@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=IRdisC
+Comment=IRC, discomplicated.
+Exec=irdisc
+Icon=irdisc
+Terminal=true
+Categories=Network;IRCClient;

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 16 16">
+  <title>IRdisC — IRC, discomplicated.</title>
+  <rect x=".5" y=".5" width="15" height="15" rx="3" fill="#18232e" stroke="#8ed9cd" stroke-width="1"/>
+  <path d="M3 8H13 M6 5L3 8L6 11 M10 5L13 8L10 11 M8 4V12" fill="none" stroke="#8ed9cd" stroke-width="1" stroke-linejoin="miter"/>
+</svg>

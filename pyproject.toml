@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "irdisc"
+version = "0.1.0"
+description = "A beginner-friendly terminal IRC client"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{name = "Max"}]
+dependencies = []
+license = "MIT"
+license-files = ["LICENSE"]
+
+[project.scripts]
+irdisc = "irdisc:main"
+
+[tool.setuptools]
+py-modules = ["irdisc", "terminal_ui", "irdisc_settings", "chat_ux", "text_layout", "release_ui"]
