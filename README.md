@@ -125,6 +125,7 @@ Implementation follows [xterm OSC and title-stack sequences](https://invisible-i
 | Chat | PgUp/PgDn; Ctrl+L | Scroll; return to latest |
 | USERS focused | Up/Down, PgUp/PgDn; Esc | Scroll USERS; return to chat |
 | Mouse wheel | Over USERS or chat | Scroll only that panel |
+| Terminal | Shift + mouse drag | Select terminal text for copying (terminal-dependent) |
 
 Right-click may be intercepted by your terminal; F3/F4 are alternatives.
 Context-menu arrows/Enter select and Esc dismisses. F2 uses displayed number keys.
