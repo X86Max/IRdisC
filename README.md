@@ -4,7 +4,7 @@
 
 **IRC, discomplicated.**
 
-**Current release candidate: v0.1.1**
+**Current release: v0.1.1**
 
 IRdisC is a lightweight IRC TUI that keeps the simplicity of a terminal and adds
 conveniences usually found in graphical clients. Choose a network and nickname;

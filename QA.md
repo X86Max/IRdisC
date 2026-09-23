@@ -1,4 +1,4 @@
-# v0.1.1 release candidate validation
+# v0.1.1 release validation
 
 Validation distinguishes automated checks from physical terminal/network behavior.
 No public IRC channel is used by this test suite. Fixtures use fictional users.

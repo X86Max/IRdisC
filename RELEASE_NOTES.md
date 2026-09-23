@@ -1,4 +1,4 @@
-# ⇹ IRdisC v0.1.1 — release candidate
+# ⇹ IRdisC v0.1.1
 
 This focused update makes authentication explicit in the connection editor:
 None, SASL PLAIN or NickServ. SASL requires an account and password over

@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.1.1 — Authentication and IRC Services UX (release candidate)
+## v0.1.1 — Authentication and IRC Services UX
 
 - Select None, SASL PLAIN or NickServ in the connection editor. Passwords remain session-only.
 - Distinguish unavailable SASL from rejected credentials; send NickServ identification after registration.
