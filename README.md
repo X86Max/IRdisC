@@ -4,7 +4,7 @@
 
 **IRC, discomplicated.**
 
-**Current release: v0.1.0**
+**Current release candidate: v0.1.1**
 
 IRdisC is a lightweight IRC TUI that keeps the simplicity of a terminal and adds
 conveniences usually found in graphical clients. Choose a network and nickname;
@@ -24,7 +24,7 @@ discover the rest through menus and built-in help.
 - Chat stays anchored when new messages arrive while reading history.
 - Nick completion, input history, drafts and multiline paste review.
 - Connection editor, saved profiles and controlled connect/disconnect/reconnect.
-- Verified TLS and optional SASL PLAIN, with a session-only password.
+- Verified TLS and explicit SASL PLAIN or NickServ authentication, with a session-only password.
 - Global grouped Commands screen, available in onboarding and chat.
 - Optional bell with cooldown, local logs, three themes and confirmed URL opening.
 
@@ -56,7 +56,7 @@ installing into the system Python. The release bundle also contains a built whee
 
 ```bash
 python3 -m venv .venv
-.venv/bin/python -m pip install --no-index dist/irdisc-0.1.0-py3-none-any.whl
+.venv/bin/python -m pip install --no-index dist/irdisc-0.1.1-py3-none-any.whl
 .venv/bin/irdisc
 ```
 
@@ -168,12 +168,27 @@ Clear history asks for confirmation.
 
 Preferences live in `~/.config/irdisc/config.json`, or
 `$XDG_CONFIG_HOME/irdisc/config.json` when set, with private file permissions.
-They include network/server/port/TLS, nick, optional channel and SASL account,
+They include network/server/port/TLS, nick, optional channel, authentication method and SASL account,
 named profiles, theme, logging, notifications and automatic reconnect preferences.
 
-The SASL password entered in the editor is masked, held in memory and **not saved
-in settings or SASL protocol logs**. Enter it again after restarting.
-`/settings` does not reveal it. Only SASL PLAIN over verified TLS is supported.
+Choose **None**, **SASL PLAIN** or **NickServ** in the connection editor (Space
+cycles options). SASL PLAIN needs an account and password, and works only when
+the network advertises SASL PLAIN. NickServ sends `IDENTIFY` after IRC
+registration using the current nickname; the client reports only that it sent
+the request, since service success responses vary among networks. Both methods
+require verified TLS. Passwords are masked in the editor, held in memory only
+and **never saved in settings or logs**. Enter them again after restarting.
+`/settings` shows the selected method without displaying a password. New profiles
+default to None; older profiles with a SASL account retain SASL PLAIN.
+
+`/msg NickServ` and `/msg ChanServ` show the service destination in the local
+echo (for example, `/msg ChanServ INFO #irdisc`) and replies in
+the conversation where the command was entered. A matching service reply is
+routed there for up to 30 seconds; unrelated later notices return to server.
+An actual service query remains a normal conversation. Manually entered service
+credential arguments are masked in the local echo and while typing; complete
+credential commands are omitted from input history. Prefer
+the connection editor for NickServ identification.
 
 Logs are off by default. `/log on` writes under `~/.local/state/irdisc/logs`, or
 `$XDG_STATE_HOME/irdisc/logs`. Do not type secrets as ordinary messages: normal
@@ -191,7 +206,8 @@ Use `/connection` or F2 → Connection settings, correct the fields and Save & C
 No restart or configuration-file deletion is needed. Validation appears beside
 fields; runtime failure is labeled Connection error in the header.
 
-SASL failure blocks automatic channel join but may leave the connection open
+SASL unavailable and SASL rejection have separate messages. Either condition
+blocks automatic channel join but may leave the connection open
 without authentication. Review settings before reconnecting. Automatic reconnect
 is off by default; when enabled it uses increasing delays and can be cancelled.
 
@@ -227,7 +243,7 @@ a claim of testing all supported Python versions or terminal emulators.
 
 - One active network; multiple saved profiles.
 - History stays in memory, capped at 400 messages per conversation, and is not restored.
-- Partial IRCv3, SASL PLAIN only, no DCC or server history replay.
+- Partial IRCv3, SASL PLAIN and basic NickServ identification, no DCC or server history replay.
 - Local echo means socket acceptance, not confirmed remote delivery.
 - Below 50 × 10, a resize prompt; below 90 columns, sidebars hide.
 - Complex emoji widths, fonts, colors, bell, mouse and function keys vary by terminal.

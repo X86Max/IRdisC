@@ -128,7 +128,7 @@ class ConnectionTests(unittest.TestCase):
     @patch('terminal_ui.curses.noecho')
     def test_editor_masks_password(self, _):
         self.app.sasl_password = 'super-private'
-        self.screen.get_wch.side_effect = ['\t']*7 + ['\x1b']
+        self.screen.get_wch.side_effect = ['\t']*8 + ['\x1b']
         self.app.edit_connection()
         drawn = str(self.screen.addnstr.call_args_list)
         self.assertNotIn('super-private', drawn)
@@ -195,7 +195,7 @@ class ConnectionTests(unittest.TestCase):
                 self.app.process_events()
                 self.assertEqual(self.app.status, 'Connection error')
                 self.screen.get_wch.side_effect = (['\t', '\x15'] + list('127.0.0.1') +
-                    ['\t', '\x15'] + list(str(port)) + ['\t']*7 + ['\n'])
+                    ['\t', '\x15'] + list(str(port)) + ['\t']*8 + ['\n'])
                 with patch('terminal_ui.save_preferences', side_effect=lambda prefs: save_preferences(prefs, path)):
                     self.app.command('/connection')
                 deadline = time.monotonic()+3

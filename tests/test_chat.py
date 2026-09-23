@@ -75,6 +75,7 @@ class ChatTests(unittest.TestCase):
     @patch('terminal_ui.time.monotonic')
     def test_optional_reconnect_countdown(self, monotonic, start_client):
         self.app.prefs.auto_reconnect = True
+        self.app.prefs.notifications = False
         monotonic.side_effect = [100, 100]
         self.app.events.put(Event('status', 'Disconnected'))
         self.app.process_events()

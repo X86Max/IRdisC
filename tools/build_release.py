@@ -13,7 +13,7 @@ import tempfile
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = '0.1.0'
+VERSION = '0.1.1'
 TOP = f'IRdisC-{VERSION}'
 FILES = ['irdisc.py', 'terminal_ui.py', 'irdisc_settings.py', 'chat_ux.py',
          'text_layout.py', 'release_ui.py', 'pyproject.toml', 'MANIFEST.in',

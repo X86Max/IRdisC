@@ -1,12 +1,17 @@
-# v0.1.0 release validation
+# v0.1.1 release candidate validation
 
 Validation distinguishes automated checks from physical terminal/network behavior.
 No public IRC channel is used by this test suite. Fixtures use fictional users.
+The maintainer reported successful OFTC checks for NickServ identification and
+contextual ChanServ/NickServ replies before this RC refinement; the revised
+input masking and local echo still need a quick on-network visual check.
 
 ## Automated checks
 
 Run `python3 -m unittest discover -v` from a clean source extraction.
-Result in this environment: **82 tests passed**.
+Run the complete suite after changes; the v0.1.1 service/authentication regressions
+are in `tests/test_services_auth.py`.
+Result in this environment: **93 tests passed** (Linux/Python 3.12).
 
 | Area | Evidence |
 | --- | --- |
@@ -14,6 +19,7 @@ Result in this environment: **82 tests passed**.
 | Save transaction and no partial edits/password persistence | test_connection.py and test_settings_auth.py |
 | Invalid configuration → DNS failure → correction → JOIN in same app | Loopback TCP fixture in test_connection.py |
 | Connect/disconnect/reconnect, TLS/SASL failures, timeout/refusal | test_connection.py, test_protocol.py, test_settings_auth.py |
+| SASL unavailable vs rejected, NickServ after welcome, service context and secret handling | test_services_auth.py |
 | Multiple conversations, PMs, membership and command errors | test_chat.py and test_ux.py |
 | 281-user list, independent scroll, mouse after scroll, join/part anchors | test_layout.py |
 | Visual-line chat scroll, long URLs/topics, resize and narrow layout | test_layout.py |
@@ -24,6 +30,10 @@ Result in this environment: **82 tests passed**.
 | Terminal title, network changes, unsupported output, exceptions, control-character sanitization | test_terminal_title.py |
 
 ## Render and package checks
+
+The screenshot and icon inspection below are inherited from v0.1.0; these
+unchanged visual assets were not regenerated for v0.1.1. The v0.1.1 wheel was
+installed in an isolated virtual environment and passed `terminal_smoke.py`.
 
 - Real Linux curses renderer exercised in an xterm-256color pseudoterminal for the
   screenshot. Data is synthetic, and there is no remote connection.
@@ -49,11 +59,16 @@ session in the target Linux terminal:
 1. Start with a temporary empty XDG_CONFIG_HOME/XDG_STATE_HOME. Review empty fields,
    mouse/keyboard dropdown, Custom, Save, Cancel and Save & Connect.
 2. Connect to a chosen real network, enter an intended channel, disconnect/reconnect.
-   Check certificate/authentication behavior against that network if using SASL.
-3. Try mouse/right-click/wheel, completion/history, PM/WHOIS, large channel scrolling,
+   Check certificate behavior, SASL PLAIN support/rejection or NickServ identification
+   with a test account. Some networks require a manual join after NickServ replies;
+   IRdisC sends the identification before the configured autojoin but cannot infer
+   service success from generic IRC replies.
+3. From a channel, run harmless `/msg ChanServ INFO #channel` and
+   `/msg NickServ STATUS YourNick`; check replies and unsolicited notices.
+4. Try mouse/right-click/wheel, completion/history, PM/WHOIS, large channel scrolling,
    context menus and Commands. F1 interception and terminal bell are emulator settings;
    verify Ctrl+G and clickable Commands as alternatives.
-4. Resize/maximize/restore; confirm wrap, independent USERS scroll and readable small
+5. Resize/maximize/restore; confirm wrap, independent USERS scroll and readable small
    layout. Verify the tip disappears. Check links/clipboard with installed handlers.
 
 These physical-terminal and live-network checks are **not marked passed** merely

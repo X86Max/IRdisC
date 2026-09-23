@@ -28,6 +28,38 @@ def valid_target(value):
     return bool(value) and not any(c.isspace() or c in ',:\x00\x07' for c in value)
 
 
+def service_secret(target, message):
+    """Manual service credentials must never enter history or visible buffers."""
+    if fold(target) not in ('nickserv', 'chanserv'):
+        return False
+    return bool(service_credential_parts(message))
+
+
+def service_credential_parts(message):
+    """Keep only the recognized command verb; all arguments may be secrets."""
+    return re.match(r'^(\s*(?:IDENTIFY|IDENT|LOGIN|AUTH|REGISTER|SET\s+PASSWORD|SET\s+PASS|RECOVER|GHOST|RELEASE)\b)(.*)$', message, re.I | re.S)
+
+
+def redact_service_command(target, message):
+    parts = service_credential_parts(message) if fold(target) in ('nickserv', 'chanserv') else None
+    if not parts:
+        return message
+    return parts[1] + ''.join('*' if not c.isspace() else c for c in parts[2])
+
+
+def service_input_parts(text, active):
+    match = re.match(r'^(/msg\s+)(\S+)(\s+)(.*)$', text, re.I | re.S)
+    if match:
+        return match[1] + match[2] + match[3], match[2], match[4]
+    return '', active, text
+
+
+def masked_service_input(text, active):
+    prefix, target, message = service_input_parts(text, active)
+    # Preserve spacing and cursor position while concealing every argument.
+    return prefix + redact_service_command(target, message)
+
+
 @dataclass
 class Buffer:
     name: str
@@ -67,6 +99,9 @@ class ChatApp(ReleaseUI, ChatUX, App):
         self.nick = self.profile.nick
         self.channel = self.profile.channel
         self.sasl_password = ''
+        self.service_context = {}
+        self.service_queries = set()
+        self.session_secrets = []
         self.ignored = set()
         self.reconnect_due = 0.0
         self.reconnect_attempts = 0
@@ -95,10 +130,11 @@ class ChatApp(ReleaseUI, ChatUX, App):
         p = self.profile
         fields = [('name', 'Network [Enter: select]'), ('host', 'Server'), ('port', 'Port'),
                   ('tls', 'TLS (Space toggles)'), ('nick', 'Nick'),
-                  ('channel', 'Channel (optional)'), ('sasl_account', 'SASL account'),
-                  ('password', 'Password (memory only)')]
+                  ('channel', 'Channel (optional)'), ('auth_method', 'Auth (Space: None / SASL PLAIN / NickServ)'),
+                  ('sasl_account', 'SASL account'), ('password', 'Auth password (memory only)')]
         values = {key: str(getattr(p, key)) for key, _ in fields if key != 'password'}
         values['tls'] = 'yes' if p.tls else 'no'
+        values['auth_method'] = p.auth_method
         values['password'] = self.sasl_password
         selected, cursor, errors = 0, len(values['name']), {}
         note = ''
@@ -118,16 +154,18 @@ class ChatApp(ReleaseUI, ChatUX, App):
                     except curses.error:
                         pass
                     continue
-                self.put(0, 1, '⇹ IRdisC v0.1.0 | ' + self.status, w-2, curses.A_BOLD)
+                self.put(0, 1, '⇹ IRdisC v0.1.1 | ' + self.status, w-2, curses.A_BOLD)
                 self.put(1, 1, 'IRC, discomplicated. | Tab: next | Esc: Cancel | F4: load saved', w-2)
                 rows = max(1, (h-6)//2)
                 start = max(0, min(selected, len(fields)-1)-rows+1)
                 for index in range(start, min(len(fields), start+rows)):
                     key, label = fields[index]
                     row = 2 + (index-start)*2
-                    value = '*' * len(values[key]) if key == 'password' else values[key]
+                    value = ('*' * len(values[key]) if key == 'password' else
+                             {'none': 'None', 'sasl': 'SASL PLAIN', 'nickserv': 'NickServ (after connecting)'}.get(values[key], values[key])
+                             if key == 'auth_method' else values[key])
                     # Keep the end of long values visible on narrow terminals.
-                    placeholders = {'name': 'Choose network or type a name', 'host': 'irc.example.org', 'port': '6697', 'nick': 'Your nickname', 'channel': 'Optional: #channel', 'sasl_account': 'Optional account', 'password': 'Optional password'}
+                    placeholders = {'name': 'Choose network or type a name', 'host': 'irc.example.org', 'port': '6697', 'nick': 'Your nickname', 'channel': 'Optional: #channel', 'sasl_account': 'Required for SASL PLAIN', 'password': 'Required for selected auth'}
                     text = label + ': ' + (value or '<'+placeholders.get(key, '')+'>')
                     caret = len(label)+2+cursor
                     offset = max(0, (caret if selected == index else len(text))-max(1,w-4))
@@ -175,7 +213,7 @@ class ChatApp(ReleaseUI, ChatUX, App):
                         cursor = len(values[fields[selected][0]])
                         if selected == 0:
                             key = '\n'
-                        elif fields[selected][0] == 'tls':
+                        elif fields[selected][0] in ('tls', 'auth_method'):
                             key = ' '
                         else:
                             continue
@@ -188,6 +226,7 @@ class ChatApp(ReleaseUI, ChatUX, App):
                             loaded = Profile(**saved)
                             values.update({field: str(getattr(loaded, field)) for field, _ in fields if field != 'password'})
                             values['tls'] = 'yes' if loaded.tls else 'no'
+                            values['auth_method'] = loaded.auth_method
                             values['password'] = ''
                             selected, cursor, errors = 1, len(values['host']), {}
                             note = 'Loaded into editor only. Save or Cancel.'
@@ -217,7 +256,7 @@ class ChatApp(ReleaseUI, ChatUX, App):
                     candidate = Profile(values['name'].strip(), values['host'].strip(),
                                         values['port'], values['tls'] == 'yes',
                                         values['nick'].strip(), values['channel'].strip(),
-                                        values['sasl_account'].strip())
+                                        values['sasl_account'].strip(), values['auth_method'])
                     connect = selected == len(fields)+1
                     errors = validate_profile(candidate, values['password'], connecting=connect)
                     if errors:
@@ -238,6 +277,10 @@ class ChatApp(ReleaseUI, ChatUX, App):
                 if field_name == 'tls':
                     if key in (' ', 'y', 'Y', 'n', 'N'):
                         values[field_name] = ('no' if value == 'yes' else 'yes') if key == ' ' else ('yes' if key.lower() == 'y' else 'no')
+                elif field_name == 'auth_method':
+                    if key == ' ':
+                        choices = ('none', 'sasl', 'nickserv')
+                        values[field_name] = choices[(choices.index(value)+1) % len(choices)]
                 elif key == '\x15':
                     values[field_name], cursor = '', 0
                 elif key in ('\x7f', '\b', curses.KEY_BACKSPACE) and cursor:
@@ -267,7 +310,7 @@ class ChatApp(ReleaseUI, ChatUX, App):
         prefs.profile = profile
         save_preferences(prefs)  # Commit only after persistence succeeds.
         self.prefs, self.profile = prefs, profile
-        self.sasl_password = password if profile.sasl_account else ''
+        self.sasl_password = password if profile.auth_method != 'none' else ''
         self.add_message('server', 'Connection settings saved. Use /connect or /reconnect.', 'server')
         if connect:
             self.request_connect(replace=True)
@@ -294,6 +337,8 @@ class ChatApp(ReleaseUI, ChatUX, App):
         self.reconnect_cancelled = True
         self.reconnect_due = 0
         self.ready = False
+        self.service_context.clear()
+        self.service_queries.clear()
         self.status = 'Disconnected'
         for buf in self.buffers.values():
             buf.joined = False
@@ -305,6 +350,8 @@ class ChatApp(ReleaseUI, ChatUX, App):
         self.reconnect_due = 0
         self.reconnect_cancelled = False
         self.auth_failed = False
+        self.service_context.clear()
+        self.service_queries.clear()
         self.ready = False
         self.pending_connect = False
         # Each session gets its own queue: late events cannot alter its replacement.
@@ -314,7 +361,8 @@ class ChatApp(ReleaseUI, ChatUX, App):
         self.client = __import__('irdisc').IRCClient(
             self.profile.host, self.profile.port, self.profile.nick, self.events,
             tls=self.profile.tls, username=self.profile.nick,
-            sasl_account=self.profile.sasl_account, sasl_password=self.sasl_password)
+            sasl_account=self.profile.sasl_account, sasl_password=self.sasl_password,
+            auth_method=self.profile.auth_method)
         self.status = 'Connecting'
         self.client.connect()
         self.add_message('server', f'Connecting to {self.profile.host}:{self.profile.port}…', 'server')
@@ -339,7 +387,7 @@ class ChatApp(ReleaseUI, ChatUX, App):
     def add_message(self, kind, text, target=None):
         if not hasattr(self, 'buffers'):
             return super().add_message(kind, text)
-        secrets = [self.sasl_password, getattr(self.client, 'sasl_password', '')]
+        secrets = [self.sasl_password, getattr(self.client, 'sasl_password', '')] + self.session_secrets
         for secret in secrets:
             if isinstance(secret, str) and secret:
                 text = text.replace(secret, '[redacted]')
@@ -452,7 +500,7 @@ class ChatApp(ReleaseUI, ChatUX, App):
                 self.auth_failed = True
                 self.status = 'Authentication error'
                 self.reconnect_cancelled = True
-                self.add_message('error', 'SASL authentication failed or is unavailable. Review account/password in /connection. Connected without authentication; autojoin paused.', 'server')
+                self.add_message('error', event.text + ' Connected without authentication; autojoin paused.', 'server')
             elif event.kind == 'connection_error':
                 if self.ready and not self.reconnect_cancelled:
                     self.bell()
@@ -484,12 +532,31 @@ class ChatApp(ReleaseUI, ChatUX, App):
                 self.client.nick = params[0]
             self.status = 'Authentication error' if self.auth_failed else f'Connected as {self.client.nick} | {"TLS" if self.session_profile.tls else "NO TLS"}'
             self.add_message('server', trailing, 'server')
+            if self.session_profile.auth_method == 'nickserv':
+                # Registration is complete. Send before autojoin; no success is inferred.
+                if self.client.send(f'PRIVMSG NickServ :IDENTIFY {self.client.sasl_password}'):
+                    self.add_message('server', 'NickServ identification sent.', 'server')
+                else:
+                    self.auth_failed = True
+                    self.status = 'Authentication error'
+                    self.add_message('error', 'NickServ identification could not be sent; autojoin paused.', 'server')
             if self.channel and not self.auth_failed:
                 self.client.send(f'JOIN {self.channel}')
         elif command in ('PRIVMSG', 'NOTICE') and params:
             target = params[0] if params[0].startswith(('#', '&')) else nick
             if command == 'NOTICE':
                 target = 'server'
+            service = fold(nick)
+            if service in ('nickserv', 'chanserv') and command in ('NOTICE', 'PRIVMSG'):
+                context = self.service_context.get(service)
+                if context:
+                    origin, expires = context
+                    if time.monotonic() <= expires and origin in self.buffers:
+                        target = origin
+                    else:
+                        self.service_context.pop(service, None)
+                elif service in self.service_queries and service in self.buffers:
+                    target = service
             if fold(nick) in self.ignored:
                 return
             if trailing.startswith('\x01'):
@@ -578,7 +645,7 @@ class ChatApp(ReleaseUI, ChatUX, App):
             if kind == 'error' and self.active != 'server':
                 self.add_message(kind, f'{errors.get(command, command)} {detail} {trailing}')
 
-    def send_message(self, target, text, action=False):
+    def send_message(self, target, text, action=False, *, service_origin=None):
         if not self.ready or not self.client or not self.client.connected:
             self.add_message('error', 'Not registered with the server yet.')
             return False
@@ -592,28 +659,56 @@ class ChatApp(ReleaseUI, ChatUX, App):
             self.add_message('error', 'Please wait a second before sending again. Your draft was kept.')
             return False
         payload = '\x01ACTION ' + text + '\x01' if action else text
+        sensitive = service_secret(target, text)
+        if sensitive:
+            # Retain the command body only in memory for redacting server echoes.
+            self.session_secrets.append(text)
+            parts = service_credential_parts(text)
+            if parts:
+                self.session_secrets.extend(parts[2].split())
         if self.client.send(f'PRIVMSG {target} :{payload}'):
             self.last_send = time.monotonic()
-            shown = f'* {self.client.nick} {text}' if action else f'<{self.client.nick}> {text}'
-            self.add_message('outgoing', shown, target)
+            origin = service_origin if service_origin is not None else target
+            if fold(target) in ('nickserv', 'chanserv') and service_origin is None:
+                self.service_context.pop(fold(target), None)
+            if fold(target) in ('nickserv', 'chanserv') and service_origin is not None:
+                if fold(origin) != fold(target):
+                    self.service_context[fold(target)] = (fold(origin), time.monotonic() + 30)
+                else:
+                    self.service_context.pop(fold(target), None)
+            if fold(target) in ('nickserv', 'chanserv') and not action:
+                shown = f'/msg {target} {redact_service_command(target, text)}'
+            else:
+                shown = f'* {self.client.nick} {text}' if action else f'<{self.client.nick}> {text}'
+            self.add_message('outgoing', shown, origin)
             return True
-        self.add_message('error', 'Send failed. Your draft was kept.')
+        self.add_message('error', 'Send failed. Re-enter the credential in /connection.' if sensitive else 'Send failed. Your draft was kept.')
         return False
 
     def submit(self):
         text = self.input_text.strip()
         if not text:
             return
-        self.history.append(text)
-        self.history = self.history[-100:]
+        _, target, message = service_input_parts(text, self.active)
+        sensitive = service_secret(target, message)
+        if not sensitive:
+            sensitive = any(isinstance(secret, str) and secret and secret in text for secret in
+                            [self.sasl_password, getattr(self.client, 'sasl_password', '')] + self.session_secrets)
+        if not sensitive:
+            self.history.append(text)
+            self.history = self.history[-100:]
+        else:
+            self.history_draft = ''
         self.history_pos = len(self.history)
         if text.startswith('/'):
             self.input_text = ''
             self.cursor = 0
             self.command(text)
-        elif self.send_message(self.buffers[self.active].name, text):
-            self.input_text = ''
-            self.cursor = 0
+        else:
+            delivered = self.send_message(self.buffers[self.active].name, text)
+            if delivered or sensitive:
+                self.input_text = ''
+                self.cursor = 0
 
     def command(self, text):
         name, _, arg = text[1:].partition(' ')
@@ -661,6 +756,9 @@ class ChatApp(ReleaseUI, ChatUX, App):
         elif name == 'switch' and fold(arg) in self.buffers:
             self.switch(arg)
         elif name == 'query' and valid_target(arg) and not arg.startswith(('#', '&')):
+            self.service_context.pop(fold(arg), None)
+            if fold(arg) in ('nickserv', 'chanserv'):
+                self.service_queries.add(fold(arg))
             self.switch(arg)
         elif name == 'ignore' and valid_target(arg):
             self.ignored.add(fold(arg))
@@ -713,7 +811,7 @@ class ChatApp(ReleaseUI, ChatUX, App):
             self.disconnect()
         elif name == 'settings':
             p = self.profile
-            self.add_message('server', f'Network={p.name} server={p.host}:{p.port} TLS={p.tls} nick={p.nick} channel={p.channel or "(none)"} SASL={"enabled" if p.sasl_account else "disabled"}', 'server')
+            self.add_message('server', f'Network={p.name} server={p.host}:{p.port} TLS={p.tls} nick={p.nick} channel={p.channel or "(none)"} auth={p.auth_method}', 'server')
             self.add_message('server', f'logging={self.prefs.logging} auto-reconnect={self.prefs.auto_reconnect} notifications={self.prefs.notifications} theme={self.prefs.theme}', 'server')
             self.switch('server')
         elif name == 'reconnect':
@@ -747,7 +845,9 @@ class ChatApp(ReleaseUI, ChatUX, App):
         elif name == 'msg':
             target, _, message = arg.partition(' ')
             if valid_target(target) and message:
-                if not self.send_message(target, message):
+                service = fold(target) in ('nickserv', 'chanserv')
+                origin = buf.name if service else None
+                if not self.send_message(target, message, service_origin=origin) and not service_secret(target, message):
                     self.input_text = text
                     self.cursor = len(text)
             else:
@@ -884,7 +984,11 @@ class ChatApp(ReleaseUI, ChatUX, App):
         self.put(h-3, 0, hint, w-1, curses.A_REVERSE)
         self.put(h-2, 0, 'Tip: maximize terminal for more messages/users. Esc: dismiss' if self.ready and w < 90 and not self.size_tip_dismissed else 'F7: focus USERS | F8: full topic | Click user: PM', w-1, curses.A_DIM)
         offset = max(0, self.cursor - (w-5))
-        self.put(h-1, 0, '> ' + self.input_text[offset:], w-1)
+        display = masked_service_input(self.input_text, self.active)
+        for secret in [self.sasl_password, getattr(self.client, 'sasl_password', '')] + self.session_secrets:
+            if isinstance(secret, str) and secret:
+                display = display.replace(secret, '*' * len(secret))
+        self.put(h-1, 0, '> ' + display[offset:], w-1)
         if self.menu:
             for row, line in enumerate([' ACTIONS (press number; Esc closes)', ' 1 Join channel', ' 2 Private message', ' 3 WHOIS user', ' 4 Leave channel', ' 5 Help', ' 6 Quit', ' 7 Connection settings', ' 8 Connect / Reconnect', ' 9 Disconnect'], 0):
                 self.put(row, max(0, (w-40)//2), line.ljust(39), min(39, w-1), curses.A_REVERSE)

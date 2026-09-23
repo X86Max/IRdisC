@@ -18,6 +18,7 @@ class Profile:
     nick: str = ""
     channel: str = ""
     sasl_account: str = ""
+    auth_method: str = "none"
 
 
 @dataclass
@@ -56,10 +57,20 @@ def validate_profile(profile, password='', *, connecting=False):
     if channel and (len(channel) < 2 or not channel.startswith(('#', '&')) or
                     any(c.isspace() or c in ',:\x00\x07' for c in channel)):
         errors['channel'] = 'Use #channel or &channel, or leave empty.'
-    if profile.sasl_account and (not profile.tls or any(c.isspace() or not c.isprintable() for c in profile.sasl_account)):
-        errors['sasl_account'] = 'SASL needs TLS and an account without spaces/control characters.'
-    if connecting and profile.sasl_account and not password:
-        errors['password'] = 'Enter the SASL password, or clear the account.'
+    if profile.auth_method not in ('none', 'sasl', 'nickserv'):
+        errors['auth_method'] = 'Choose None, SASL PLAIN or NickServ.'
+    if profile.auth_method == 'sasl':
+        if not profile.tls:
+            errors['tls'] = 'SASL PLAIN requires verified TLS.'
+        if not profile.sasl_account or any(c.isspace() or not c.isprintable() for c in profile.sasl_account):
+            errors['sasl_account'] = 'Enter a SASL account without spaces/control characters.'
+        if connecting and not password:
+            errors['password'] = 'Enter the SASL PLAIN password.'
+    if profile.auth_method == 'nickserv':
+        if not profile.tls:
+            errors['tls'] = 'NickServ password requires verified TLS.'
+        if connecting and not password:
+            errors['password'] = 'Enter the NickServ password.'
     return errors
 
 
@@ -91,8 +102,11 @@ def load_preferences(path: Path | None = None) -> Preferences:
         saved_profiles = raw.get("profiles", {})
         if not isinstance(saved_profiles, dict):
             saved_profiles = {}
-        saved_profiles = {str(key)[:40]: value for key, value in saved_profiles.items()
-                          if isinstance(value, dict)}
+        saved_profiles = {str(key)[:40]: {
+            field: value[field] for field in Profile.__dataclass_fields__ if field in value
+        } for key, value in saved_profiles.items() if isinstance(value, dict)}
+        for value in saved_profiles.values():
+            value.setdefault('auth_method', 'sasl' if value.get('sasl_account') else 'none')
         return Preferences(
             Profile(
                 name=str(profile.get("name", "OFTC"))[:40],
@@ -102,6 +116,7 @@ def load_preferences(path: Path | None = None) -> Preferences:
                 nick=str(profile.get("nick", ""))[:30],
                 channel=str(profile.get("channel", ""))[:80],
                 sasl_account=str(profile.get("sasl_account", ""))[:100],
+                auth_method=str(profile.get('auth_method', 'sasl' if profile.get('sasl_account') else 'none')),
             ),
             theme=str(raw.get("theme", "dark")) if raw.get("theme") in {"dark", "light", "mono"} else "dark",
             logging=bool(raw.get("logging", False)),
@@ -114,12 +129,17 @@ def load_preferences(path: Path | None = None) -> Preferences:
 
 
 def save_preferences(prefs: Preferences, path: Path | None = None) -> Path:
-    """Save non-secret settings atomically. SASL passwords are never accepted."""
+    """Save only allowlisted profile fields; passwords are never persisted."""
     path = path or config_dir() / "config.json"
-    prefs.profiles[prefs.profile.name] = asdict(prefs.profile)
+    safe = asdict(prefs)
+    safe['profiles'] = {name: {key: value for key, value in profile.items()
+                              if key in Profile.__dataclass_fields__}
+                        for name, profile in prefs.profiles.items() if isinstance(profile, dict)}
+    safe['profiles'][prefs.profile.name] = asdict(prefs.profile)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(asdict(prefs), indent=2) + "\n", encoding="utf-8")
+    temporary.write_text(json.dumps(safe, indent=2) + "\n", encoding="utf-8")
+    prefs.profiles = safe['profiles']
     os.chmod(temporary, 0o600)
     temporary.replace(path)
     return path

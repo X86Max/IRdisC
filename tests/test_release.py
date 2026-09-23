@@ -40,7 +40,7 @@ class ReleaseTests(unittest.TestCase):
     @patch('terminal_ui.save_preferences')
     def test_onboarding_save_and_connect(self, save, _):
         # Network dropdown -> OFTC -> nick; leave optional channel blank.
-        self.screen.get_wch.side_effect = ['\n', '\n'] + ['\t']*4 + list('Alice') + ['\t']*5 + ['\n']
+        self.screen.get_wch.side_effect = ['\n', '\n'] + ['\t']*4 + list('Alice') + ['\t']*6 + ['\n']
         with patch.object(self.app, 'request_connect') as connect:
             self.app.edit_connection()
         self.assertEqual(self.app.profile.nick, 'Alice')

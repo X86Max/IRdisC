@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""IRdisC v0.1 — a deliberately small, beginner-friendly IRC terminal client."""
+"""IRdisC v0.1.1 — a deliberately small, beginner-friendly IRC terminal client."""
 
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ def parse_irc_line(line: str) -> tuple[str, list[str], str]:
 class IRCClient:
     def __init__(self, host: str, port: int, nick: str, events: queue.Queue[Event],
                  *, tls: bool = True, username: str = "", sasl_account: str = "",
-                 sasl_password: str = ""):
+                 sasl_password: str = "", auth_method: str | None = None):
         self.host = host
         self.port = port
         self.nick = nick
@@ -57,8 +57,10 @@ class IRCClient:
         self.username = username or nick
         self.sasl_account = sasl_account
         self.sasl_password = sasl_password
+        self.auth_method = auth_method or ('sasl' if sasl_account else 'none')
         self.cap_ended = False
         self.capabilities: set[str] = set()
+        self.sasl_mechanisms: str | None = None
         self.sock: socket.socket | None = None
         self.connected = False
         self.stop_requested = threading.Event()
@@ -126,18 +128,26 @@ class IRCClient:
             capabilities = trailing.split()
             if subcommand == "LS":
                 self.capabilities.update(cap.split("=", 1)[0].lstrip("-~") for cap in capabilities)
+                for cap in capabilities:
+                    if cap.lstrip('-~').startswith('sasl='):
+                        self.sasl_mechanisms = cap.split('=', 1)[1]
                 if params[-1] == "*":
                     return
-                if self.sasl_account and self.sasl_password and "sasl" in self.capabilities:
+                if (self.auth_method == 'sasl' and self.sasl_account and self.sasl_password
+                        and 'sasl' in self.capabilities
+                        and (self.sasl_mechanisms is None or 'PLAIN' in self.sasl_mechanisms.upper().split(','))):
                     self.send("CAP REQ :sasl")
                 else:
-                    if self.sasl_account:
+                    if self.auth_method == 'sasl':
                         self.events.put(Event("auth_error", "SASL is unavailable on this server."))
                     self._end_cap()
-            elif subcommand == "ACK" and any(cap.split("=", 1)[0].lstrip("-~") == "sasl" for cap in capabilities):
+            elif subcommand == "ACK" and any(cap.split("=", 1)[0].lstrip("~") == "sasl" for cap in capabilities):
                 self.send("AUTHENTICATE PLAIN")
+            elif subcommand == "ACK" and any(cap.split("=", 1)[0].lstrip("~") == "-sasl" for cap in capabilities):
+                self.events.put(Event("auth_error", "SASL is unavailable on this server (capability removed)."))
+                self._end_cap()
             elif subcommand == "NAK":
-                self.events.put(Event("auth_error", "Server rejected the requested capability."))
+                self.events.put(Event("auth_error", "SASL is unavailable on this server (capability rejected)."))
                 self._end_cap()
         elif command == "AUTHENTICATE" and params and params[0] == "+":
             plain = f"\0{self.sasl_account}\0{self.sasl_password}".encode("utf-8")
@@ -150,7 +160,7 @@ class IRCClient:
             self.events.put(Event("auth", "SASL authentication succeeded."))
             self._end_cap()
         elif command in {"904", "905", "906", "907"}:
-            self.events.put(Event("auth_error", trailing or "SASL authentication failed."))
+            self.events.put(Event("auth_error", "SASL authentication failed. Review the account and password in /connection."))
             self._end_cap()
         # Protocol state is interpreted by the UI on its own thread.
 
@@ -351,7 +361,7 @@ def main() -> None:
     import argparse
     import sys
     parser = argparse.ArgumentParser(description='⇹ IRdisC — IRC, discomplicated.')
-    parser.add_argument('--version', action='version', version='IRdisC 0.1.0')
+    parser.add_argument('--version', action='version', version='IRdisC 0.1.1')
     parser.parse_args()
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         parser.exit(2, 'IRdisC needs an interactive terminal. Use --help for usage.\n')
