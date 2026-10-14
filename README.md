@@ -4,7 +4,7 @@
 
 **IRC, discomplicated.**
 
-**Latest stable release: [v0.1.2](https://github.com/X86Max/IRdisC/releases/tag/v0.1.2)** — security, protocol correctness and stability improvements. Previous releases remain available.
+**Latest stable release: [v0.1.2](https://github.com/X86Max/IRdisC/releases/tag/v0.1.2)** — security, protocol correctness, and stability improvements. Previous releases remain available.
 
 IRdisC is a lightweight IRC TUI that keeps the simplicity of a terminal and adds
 conveniences usually found in graphical clients. Choose a network and nickname;
@@ -34,7 +34,7 @@ Requires **Python 3.11+**, standard-library `curses`, and a UTF-8 Linux terminal
 There are **no third-party runtime Python dependencies**. Minimum size is 50 × 10;
 110 × 28 is comfortable. Sidebars appear at 90 columns and above.
 
-Extract the source ZIP or tar.gz, open a terminal in its directory and run:
+Download the [v0.1.2 source archive](https://github.com/X86Max/IRdisC/releases/tag/v0.1.2) (ZIP or tar.gz), extract it, open a terminal in the extracted source directory, and run:
 
 ```bash
 python3 irdisc.py
@@ -50,19 +50,23 @@ python3 -m venv .venv
 .venv/bin/irdisc
 ```
 
-Source installation uses setuptools >=77, declared in pyproject.toml. If your
+Source installation uses setuptools >=77, declared in `pyproject.toml`. If your
 distribution packages Python venv separately, install that package first. Avoid
-installing into the system Python. Once v0.1.2 is packaged, its release bundle will
-contain a built wheel:
+installing into the system Python.
+
+The published [v0.1.2 release](https://github.com/X86Max/IRdisC/releases/tag/v0.1.2)
+includes a [prebuilt Python wheel](https://github.com/X86Max/IRdisC/releases/download/v0.1.2/irdisc-0.1.2-py3-none-any.whl).
+Download it, open a terminal in the directory containing the `.whl` file, and
+install it inside a virtual environment:
 
 ```bash
 python3 -m venv .venv
-.venv/bin/python -m pip install --no-index dist/irdisc-0.1.2-py3-none-any.whl
+.venv/bin/python -m pip install --no-index irdisc-0.1.2-py3-none-any.whl
 .venv/bin/irdisc
 ```
 
-The wheel commands run from the bundle directory. Check the version using
-`python3 irdisc.py --version` or the installed `irdisc --version`.
+Check the version with `python3 irdisc.py --version` when running from source,
+or `.venv/bin/irdisc --version` when using the virtual environment.
 `--help` works without opening the TUI.
 
 ## Quick start
@@ -239,7 +243,7 @@ This behavior is terminal-dependent.
 
 | Platform | Status |
 | --- | --- |
-| Linux | v0.1.2 validation uses Python 3.13.5, isolated tests, local socket/TLS fixtures and real curses pseudoterminals. OFTC manual QA was reported by the maintainer. No v0.1.2 package installation has been tested yet; see QA.md. |
+| Linux | Validated with Python 3.13.5, isolated tests, local socket/TLS fixtures, and real curses pseudoterminals. Source archive and wheel installations passed in separate isolated virtual environments. OFTC manual QA was reported by the maintainer. See [QA.md](QA.md). |
 | macOS / other Unix with curses | Expected to be portable; not tested for this release. |
 | Native Windows | Unsupported in this release; standard Windows Python lacks curses. |
 | WSL | Not tested for this release. |
@@ -265,7 +269,7 @@ a claim of testing all supported Python versions or terminal emulators.
 - Below 50 × 10, a resize prompt; below 90 columns, sidebars hide.
 - Complex emoji widths, fonts, colors, bell, mouse and function keys vary by terminal.
 - Deferred issues and privacy limits are detailed in [release notes](RELEASE_NOTES.md)
-  and AUDIT_REMEDIATION.md. The review verdict was APPROVE WITH RESERVATIONS;
+  and [AUDIT_REMEDIATION.md](AUDIT_REMEDIATION.md). The review verdict was APPROVE WITH RESERVATIONS;
   there is no claim of freedom from vulnerabilities or complete IRCv3 compliance.
 
 ## Project philosophy
