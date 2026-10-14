@@ -1,6 +1,8 @@
 # IRdisC v0.1.1 — independent verification and security remediation
 
-Round 2 addresses the mandatory findings from the independent review of snapshot `7a3595c1d7c7d6382965cc55c0c025bda6a87de5` against local baseline `74d1eb7f9b40b1f4cdadbd03f3093b0cea637209`. The new suite contains **151 tests: the previous 121 + 30 new; all passed**. Review findings R1–R6, SASL 902 and `AUTHENTICATE :+` were reproduced before remediation. Current implementation, evidence, limitations and Git state are in sections F–K.
+The final targeted pass addresses **B1 only**, the leading-whitespace credential prompt leak found in the independent Round 2 review of candidate `dcc540bdc05f06ea4d3c51269e663f0cad23ee7f`. The current suite contains **158 tests: the previous 151 + 7 focused regressions; all passed**. Eight real PTY pre-submission prompts also passed. Section L records the reproduction, minimal fix, executed checks and pending independent approval.
+
+Round 2 addresses the mandatory findings from the independent review of snapshot `7a3595c1d7c7d6382965cc55c0c025bda6a87de5` against local baseline `74d1eb7f9b40b1f4cdadbd03f3093b0cea637209`. Its suite contains **151 tests: the previous 121 + 30 new; all passed**. Review findings R1–R6, SASL 902 and `AUTHENTICATE :+` were reproduced before remediation. The Round 2 implementation, evidence, limitations and historical Git state are in sections F–K. The subsequent independent review corroborated those exact fixes and the 151 passing tests but rejected the candidate for B1; this targeted pass does not reopen R7/R8 or other deferred work.
 
 Sections A–E preserve the first-pass record, including its original line references and test history. The independent review rejected that snapshot despite the 121 passing tests: paste handling and credential protection were incomplete. The first-pass “Fixed” labels below describe the original reproductions, not complete subsystem guarantees; sections F–K supersede their broader interpretation. The original socket-reference race, empty-profile persistence, reserved in-memory buffer protection and test-isolation fixes remain in place.
 
@@ -286,3 +288,75 @@ Working branch: `fix/audit-v0.1.1`. HEAD remains `74d1eb7f9b40b1f4cdadbd03f3093b
 ```
 
 The seven intended changed/new files are listed in section H. The pre-existing `release/` status entry is not a change made by this round.
+
+## L. Final targeted remediation — B1 credential prompt leak
+
+Date: 14/10/2026. Runtime: Linux, Python 3.13.5. Local baseline and independent-review candidate: `dcc540bdc05f06ea4d3c51269e663f0cad23ee7f`. The earlier Git state in section K describes the Round 2 working tree before that candidate was committed; it is historical, not the HEAD for this targeted pass.
+
+### Verification and minimal correction
+
+**B1 confirmed; medium severity.** Before correction, the new focused tests exposed synthetic plaintext in actual pre-submission `draw()` calls and paste-preview rendering. The real PTY fixture also failed its plaintext-absence assertion after exercising eight pre-submission inputs. The independent review's observation that submission/history/log protection already worked is separate from this concrete prompt disclosure.
+
+`service_input_parts` now separates the leading whitespace, classifies the remaining body with the same leading-whitespace normalization as submission, and returns the original whitespace as part of the display prefix. The existing masking logic is unchanged: service destination and command structure remain visible while recognized credential arguments are concealed. The resulting masked string retains the raw input's length; editable text and logical cursor positions are not changed. Existing terminal cleanup of nonprinting whitespace and existing cursor/layout behavior are retained, rather than redesigned.
+
+This shared helper covers `/msg`, `/me`, explicit CTCP ACTION bodies and paste previews. Execution, authentication, destination selection, action rejection, incoming redaction and paste framing are unchanged. Ordinary peer/channel text and actions remain unmasked and follow their existing submission behavior.
+
+### Exact files changed
+
+| File | Change |
+| --- | --- |
+| `terminal_ui.py:81` | Normalize the command body for classification while preserving the leading whitespace separately. This is the only application-code change. |
+| `tests/test_prompt_credentials.py` | Seven focused methods checking actual pre-submit rendering, single/multiline paste, whitespace/length/cursor preservation, exact sends, rejected actions and ordinary-message compatibility. |
+| `tools/credential_prompt_smoke.py` | Eight offline cases entered through bracketed paste into a real curses PTY with a mocked client; terminal output is captured before submission. An out-of-band checkpoint confirms each input was fully inserted/drawn, so absence of plaintext is not a skipped-input pass. |
+| `AUDIT_REMEDIATION.md` | Preserve the earlier evidence and report this targeted B1 correction separately from the 121- and 151-test results. |
+
+### Focused regressions and results
+
+| Executed check | Result |
+| --- | --- |
+| Focused tests before the fix | **7 methods run; `FAILED (failures=160)`**, zero errors, in 0.233 s. Counters include parameterized subtests; these are not 160 test methods. Ordinary-message compatibility cases also ran. |
+| Focused tests after the fix | **7/7 passed**, included in the full suite. |
+| Whitespace coverage | Leading spaces, tabs, NBSP, mixed indentation and vertical-tab/form-feed indentation; internal spaces, tabs, NBSP, mixed separators and form feed. `/msg` covers both NickServ and ChanServ. |
+| Output and submission coverage | Synthetic credentials absent from actual `draw()` calls and multiline previews; after submission, absent from command/history drafts, saved active drafts, visible buffers, logs and errors. Exact service destination and a single send are asserted for accepted commands. `/me` and explicit sensitive CTCP ACTION remain rejected with no send. Ordinary channel/peer messages and actions preserve their normal wire output/history. |
+| Focused PTY before the fix | **B1 plaintext disclosure confirmed:** the unmodified helper caused the capture to contain the exact synthetic credential, failing the security assertion. No send or public network connection. |
+| Focused PTY after the fix | **PASS: 8 real pre-submission prompts**, covering leading space/tab/NBSP/mixed whitespace, `/msg`, `/me` and explicit CTCP ACTION. Plaintext absent; command verb and credential mask present; cursor/input completion and zero sends checked. |
+| Complete isolated suite | **158/158 passed**, zero failures/errors, in 0.821 s. The previous 151 methods remain intact, plus seven B1 methods. |
+| Complete suite with default config/state lookups forbidden | **158/158 passed**, zero failures/errors, in 0.777 s. Explicit temporary logs/settings and mocked preferences are permitted. |
+| Existing terminal smoke | **PASS:** startup, picker, help, fragmented/modal/confirmation paste, subsequent commands, resize, clean quit and title save/restore. |
+| Syntax and whitespace | **25 Python files passed** in-memory compilation and Python 3.11 grammar parsing; `git diff --check` passed. Actual runtime is Python 3.13.5. |
+
+Unsubmitted editable credentials necessarily remain in input memory; the assertions distinguish protected pre-submit rendering from removal of history/draft remnants after submission. Recognized credentials sent to their intended service remain present in the authentication wire call; the tests verify that exact destination/count rather than claiming the credential is never transmitted.
+
+With HOME/XDG isolated under a temporary `$AUDIT_TMP` and `PYTHONDONTWRITEBYTECODE=1`, the executed checks included:
+
+```sh
+python3 -m unittest tests.test_prompt_credentials tests.test_services_auth tests.test_review_security
+python3 -m unittest discover -s tests
+python3 tools/credential_prompt_smoke.py
+python3 tools/terminal_smoke.py "$AUDIT_TMP/irdisc-source"
+git diff --check
+```
+
+The full-suite directory guard uses the procedure in section I, forbidding default `config_dir`/`state_dir` access. Existing unittest loopback/socketpair cases ran with authorized local sockets; the focused PTY itself opens no network socket and isolates its child HOME/XDG. The existing terminal smoke used a temporary launcher outside the checkout. No dependencies were installed, and no production IRC network or real credentials/configuration/logs were used. The isolated HOME/XDG directories remained empty. The accepted local-TLS evidence in section I remains historical; no new TLS result is claimed for this B1-only pass.
+
+### Git state and approval boundary
+
+Branch: `fix/audit-v0.1.1`. HEAD remains `dcc540bdc05f06ea4d3c51269e663f0cad23ee7f`. Branch/tag refs were compared with the start of this targeted pass and remained unchanged. `main`, tags, version, website and release artifacts were not changed; untracked `release/` was not opened or modified. No staging, commit, push, merge, tag or publication was performed.
+
+```text
+ M AUDIT_REMEDIATION.md
+ M terminal_ui.py
+?? release/
+?? tests/test_prompt_credentials.py
+?? tools/credential_prompt_smoke.py
+```
+
+`git diff --stat` includes only tracked files; the new test and PTY tool are also part of the four-file deliverable:
+
+```text
+ AUDIT_REMEDIATION.md | 76 +++++++++++++++++++++++++++++++++++++++++++++++++++-
+ terminal_ui.py       | 14 ++++++----
+ 2 files changed, 84 insertions(+), 6 deletions(-)
+```
+
+**Remaining blockers:** B1 is resolved in the executed focused regressions and real PTY capture. No additional blocker was identified in this targeted pass. The previously accepted R1–R6/SASL behavior remains covered by the full suite. R7/R8 and all unrelated limitations in section J remain open and unchanged. This local result awaits independent approval; no merge approval, release readiness or production-network QA is claimed.

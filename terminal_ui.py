@@ -79,13 +79,17 @@ def redact_service_command(target, message):
 
 
 def service_input_parts(text, active):
-    match = re.match(r'^(/msg\s+)(\S+)(\s+)(.*)$', text, re.I | re.S)
+    # Classify like submit().strip(), but retain indentation for display and
+    # keep the masked string the same length as the editable input.
+    body = text.lstrip()
+    leading = text[:len(text) - len(body)]
+    match = re.match(r'^(/msg\s+)(\S+)(\s+)(.*)$', body, re.I | re.S)
     if match:
-        return match[1] + match[2] + match[3], match[2], match[4]
-    action = re.match(r'^(/me\s+)(.*)$', text, re.I | re.S)
+        return leading + match[1] + match[2] + match[3], match[2], match[4]
+    action = re.match(r'^(/me\s+)(.*)$', body, re.I | re.S)
     if action:
-        return action[1], active, action[2]
-    return '', active, text
+        return leading + action[1], active, action[2]
+    return leading, active, body
 
 
 def masked_service_input(text, active):
