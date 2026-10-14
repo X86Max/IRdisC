@@ -18,7 +18,9 @@
   review: APPROVE WITH RESERVATIONS. Maintainer-reported OFTC manual QA covered
   TLS, NickServ, contextual Services replies, masking, reconnect and messaging.
 - Keep R7/R8, partial IRCv3 CAP support and unverified real-network SASL explicit
-  in RELEASE_NOTES.md and QA.md. No new runtime dependencies or feature expansion.
+  in [RELEASE_NOTES.md](RELEASE_NOTES.md) and [QA.md](QA.md). No new runtime dependencies or feature expansion.
+
+**Published:** [v0.1.2](https://github.com/X86Max/IRdisC/releases/tag/v0.1.2) — stable maintenance release.
 
 ## v0.1.1 — Authentication and IRC Services UX
 
@@ -39,5 +41,3 @@
 - Readable IRC events, safe URL confirmation and optional rate-limited bell.
 - Global grouped Commands help, installation documentation and release assets.
 - Short terminal title with active network and best-effort restoration on exit.
-
-Prepared for publication; no publication date is asserted by this package.
