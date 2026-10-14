@@ -65,29 +65,35 @@ class IRCClient:
         self.connected = False
         self.stop_requested = threading.Event()
         self.send_lock = threading.Lock()
+        self.socket_lock = threading.Lock()
         self.thread: threading.Thread | None = None
 
     def connect(self) -> None:
-        self.thread = threading.Thread(target=self._run, daemon=True)
-        self.thread.start()
+        with self.socket_lock:
+            if self.stop_requested.is_set() or (self.thread and self.thread.is_alive()):
+                return  # A reconnect uses a fresh IRCClient, with its own queue.
+            self.thread = threading.Thread(target=self._run, daemon=True)
+            self.thread.start()
 
     def _run(self) -> None:
+        sock = None
         try:
-            raw = socket.create_connection((self.host, self.port), timeout=15)
-            self.sock = raw
+            sock = socket.create_connection((self.host, self.port), timeout=15)
             if self.stop_requested.is_set():
                 return
             if self.tls:
                 context = ssl.create_default_context()
-                self.sock = context.wrap_socket(raw, server_hostname=self.host)
-            else:
-                self.sock = raw
+                sock = context.wrap_socket(sock, server_hostname=self.host)
             if self.stop_requested.is_set():
                 return
             # The connection timeout is only for establishing TLS. IRC is a
             # long-lived connection and can legitimately be quiet for hours.
-            self.sock.settimeout(None)
-            self.connected = True
+            sock.settimeout(None)
+            with self.socket_lock:
+                if self.stop_requested.is_set():
+                    return
+                self.sock = sock
+                self.connected = True
             security = "TLS" if self.tls else "unencrypted"
             self.events.put(Event("status", f"Connected to {self.host}:{self.port} ({security})"))
             self.send("CAP LS 302")
@@ -95,7 +101,7 @@ class IRCClient:
             self.send(f"USER {self.username} 0 * :{self.nick}")
             buffer = b""
             while not self.stop_requested.is_set():
-                data = self.sock.recv(4096)
+                data = sock.recv(4096)
                 if not data:
                     break
                 buffer += data
@@ -108,13 +114,20 @@ class IRCClient:
             if not self.stop_requested.is_set():
                 self.events.put(Event("connection_error", connection_error_message(exc)))
         finally:
-            self.connected = False
-            if self.sock:
+            with self.socket_lock:
+                self.connected = False
+                self.sock = None
+            # Only the network thread closes its socket. Other threads may
+            # shut it down to interrupt I/O, but never replace this reference.
+            if sock is not None:
                 try:
-                    self.sock.close()
+                    sock.shutdown(socket.SHUT_RDWR)
                 except OSError:
                     pass
-            self.sock = None
+                try:
+                    sock.close()
+                except OSError:
+                    pass
             self.events.put(Event("status", "Disconnected"))
 
     def _handle(self, line: str) -> None:
@@ -169,27 +182,51 @@ class IRCClient:
             self.cap_ended = True
             self.send("CAP END")
 
-    def send(self, line: str) -> bool:
+    def _encode_line(self, line: str) -> bytes | None:
         if any(c in line for c in '\r\n\x00') or len(line.encode('utf-8')) > 510:
             self.events.put(Event('error', 'Message rejected: too long or contains control characters.'))
-            return False
-        if not self.sock or not self.connected:
+            return None
+        return (line + "\r\n").encode("utf-8")
+
+    def send(self, line: str) -> bool:
+        payload = self._encode_line(line)
+        if payload is None:
             return False
         try:
             with self.send_lock:
-                self.sock.sendall((line + "\r\n").encode("utf-8"))
+                with self.socket_lock:
+                    sock = self.sock
+                    if sock is None or not self.connected or self.stop_requested.is_set():
+                        return False
+                # No lifecycle lock is held during blocking I/O: close() can
+                # always interrupt this write with shutdown().
+                sock.sendall(payload)
             return True
         except OSError as exc:
             self.events.put(Event("error", f"Send error: {exc}"))
             return False
 
     def close(self, message: str = "Leaving") -> None:
-        self.stop_requested.set()
-        if self.connected:
-            self.send(f"QUIT :{message}")
-        if self.sock:
+        with self.socket_lock:
+            self.stop_requested.set()
+            sock, connected = self.sock, self.connected
+            self.sock = None
+            self.connected = False
+        if sock is not None:
+            # Never wait behind a blocked sender. Graceful QUIT is best effort
+            # and bounded; shutdown wakes the owning reader and any writer.
+            if connected and self.send_lock.acquire(blocking=False):
+                try:
+                    payload = self._encode_line(f'QUIT :{message}')
+                    if payload is not None:
+                        sock.settimeout(1)
+                        sock.sendall(payload)
+                except OSError:
+                    pass
+                finally:
+                    self.send_lock.release()
             try:
-                self.sock.shutdown(socket.SHUT_RDWR)
+                sock.shutdown(socket.SHUT_RDWR)
             except OSError:
                 pass
 

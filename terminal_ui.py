@@ -7,7 +7,7 @@ import sys
 import textwrap
 import time
 from dataclasses import dataclass, field
-from chat_ux import ChatUX, mentions, urls_in, describe_modes
+from chat_ux import ChatUX, mentions, urls_in, describe_modes, pm_name, pm_nick
 from text_layout import cells, clip, wrap_cells, message_rows
 from release_ui import ReleaseUI
 
@@ -60,6 +60,22 @@ def masked_service_input(text, active):
     return prefix + redact_service_command(target, message)
 
 
+def service_credentials(target, message):
+    """Remember credential positions, rather than account/channel names."""
+    parts = service_credential_parts(message)
+    if not parts:
+        return []
+    words = parts[2].split()
+    verb = ' '.join(parts[1].upper().split())
+    if verb == 'REGISTER':
+        if fold(target) == 'chanserv' and words and words[0].startswith(('#', '&')):
+            return words[1:2]  # REGISTER #channel password [description]
+        return words[:1]  # REGISTER password [email]
+    if verb in ('SET PASSWORD', 'SET PASS'):
+        return words  # Old and new passwords may both be echoed.
+    return words[-1:]  # IDENTIFY [account/channel] password, GHOST nick password, etc.
+
+
 @dataclass
 class Buffer:
     name: str
@@ -101,7 +117,12 @@ class ChatApp(ReleaseUI, ChatUX, App):
         self.sasl_password = ''
         self.service_context = {}
         self.service_queries = set()
-        self.session_secrets = []
+        self.service_secrets = {}
+        self.paste_active = False
+        self.paste_buffer = []
+        self.paste_tail = ''
+        self.paste_rejected = False
+        self.paste_last_input = 0.0
         self.ignored = set()
         self.reconnect_due = 0.0
         self.reconnect_attempts = 0
@@ -339,6 +360,10 @@ class ChatApp(ReleaseUI, ChatUX, App):
         self.ready = False
         self.service_context.clear()
         self.service_queries.clear()
+        # Detach queued/late credential echoes before forgetting this session's
+        # secrets. The network thread retains its original event queue.
+        self.events = queue.Queue()
+        self.service_secrets.clear()
         self.status = 'Disconnected'
         for buf in self.buffers.values():
             buf.joined = False
@@ -352,6 +377,7 @@ class ChatApp(ReleaseUI, ChatUX, App):
         self.auth_failed = False
         self.service_context.clear()
         self.service_queries.clear()
+        self.service_secrets.clear()
         self.ready = False
         self.pending_connect = False
         # Each session gets its own queue: late events cannot alter its replacement.
@@ -387,10 +413,6 @@ class ChatApp(ReleaseUI, ChatUX, App):
     def add_message(self, kind, text, target=None):
         if not hasattr(self, 'buffers'):
             return super().add_message(kind, text)
-        secrets = [self.sasl_password, getattr(self.client, 'sasl_password', '')] + self.session_secrets
-        for secret in secrets:
-            if isinstance(secret, str) and secret:
-                text = text.replace(secret, '[redacted]')
         buf = self.buffer(target or self.active)
         if kind == 'message' and fold(buf.name) != self.active and not buf.unread:
             buf.first_unread = len(buf.messages)
@@ -471,6 +493,7 @@ class ChatApp(ReleaseUI, ChatUX, App):
         self.put(h-1, 0, f'Topic {view["scroll"]+1}/{len(rows)} | ↑↓ PgUp/PgDn Wheel | Esc closes', w-1, curses.A_REVERSE)
 
     def process_events(self):
+        self.expire_paste()
         while True:
             try:
                 event = self.events.get_nowait()
@@ -482,6 +505,7 @@ class ChatApp(ReleaseUI, ChatUX, App):
                 if self.status not in ('Connection error', 'Authentication error'):
                     self.status = event.text
                 if event.text == 'Disconnected':
+                    self.service_secrets.clear()
                     if self.ready and not self.reconnect_cancelled:
                         self.bell()
                     self.ready = False
@@ -495,12 +519,12 @@ class ChatApp(ReleaseUI, ChatUX, App):
                         self.status = f'Disconnected | reconnect in {delay}s (/reconnect cancel)'
                 self.add_message('server', event.text, 'server')
             elif event.kind == 'auth':
-                self.add_message('server', event.text, 'server')
+                self.add_message('server', self.redact_auth_text(event.text), 'server')
             elif event.kind == 'auth_error':
                 self.auth_failed = True
                 self.status = 'Authentication error'
                 self.reconnect_cancelled = True
-                self.add_message('error', event.text + ' Connected without authentication; autojoin paused.', 'server')
+                self.add_message('error', self.redact_auth_text(event.text) + ' Connected without authentication; autojoin paused.', 'server')
             elif event.kind == 'connection_error':
                 if self.ready and not self.reconnect_cancelled:
                     self.bell()
@@ -523,6 +547,12 @@ class ChatApp(ReleaseUI, ChatUX, App):
             line = line.partition(' ')[2]
         command, params, trailing = parse_irc_line(line)
         nick = line[1:].split(' ', 1)[0].split('!', 1)[0] if line.startswith(':') else ''
+        if fold(nick) in ('nickserv', 'chanserv'):
+            trailing = self.redact_auth_text(redact_service_command(nick, trailing), fold(nick))
+        elif line.startswith(':') and '!' not in line.split(' ', 1)[0]:
+            # Server errors can quote a command. Ordinary peer/channel text
+            # must never be censored because it happens to contain a password.
+            trailing = self.redact_auth_text(trailing)
         own = self.client.nick if self.client else self.nick
         if command == '001':
             self.ready = True
@@ -543,7 +573,7 @@ class ChatApp(ReleaseUI, ChatUX, App):
             if self.channel and not self.auth_failed:
                 self.client.send(f'JOIN {self.channel}')
         elif command in ('PRIVMSG', 'NOTICE') and params:
-            target = params[0] if params[0].startswith(('#', '&')) else nick
+            target = params[0] if params[0].startswith(('#', '&')) else pm_name(nick)
             if command == 'NOTICE':
                 target = 'server'
             service = fold(nick)
@@ -645,6 +675,17 @@ class ChatApp(ReleaseUI, ChatUX, App):
             if kind == 'error' and self.active != 'server':
                 self.add_message(kind, f'{errors.get(command, command)} {detail} {trailing}')
 
+    def redact_auth_text(self, text, service=None):
+        secrets = [self.sasl_password, getattr(self.client, 'sasl_password', '')]
+        for name, values in self.service_secrets.items():
+            if service is None or service == name:
+                secrets.extend(values)
+        secrets = sorted({s for s in secrets if isinstance(s, str) and s}, key=len, reverse=True)
+        if not secrets:
+            return text
+        pattern = r'(?<!\w)(?:' + '|'.join(re.escape(s) for s in secrets) + r')(?!\w)'
+        return re.sub(pattern, '[redacted]', text)
+
     def send_message(self, target, text, action=False, *, service_origin=None):
         if not self.ready or not self.client or not self.client.connected:
             self.add_message('error', 'Not registered with the server yet.')
@@ -661,12 +702,11 @@ class ChatApp(ReleaseUI, ChatUX, App):
         payload = '\x01ACTION ' + text + '\x01' if action else text
         sensitive = service_secret(target, text)
         if sensitive:
-            # Retain the command body only in memory for redacting server echoes.
-            self.session_secrets.append(text)
-            parts = service_credential_parts(text)
-            if parts:
-                self.session_secrets.extend(parts[2].split())
-        if self.client.send(f'PRIVMSG {target} :{payload}'):
+            # Keep credentials for this session, including partially failed
+            # writes. Do not evict an old password while it may still be echoed.
+            values = self.service_secrets.setdefault(fold(target), set())
+            values.update(word for word in service_credentials(target, text) if len(word) <= 510)
+        if self.client.send(f'PRIVMSG {pm_nick(target)} :{payload}'):
             self.last_send = time.monotonic()
             origin = service_origin if service_origin is not None else target
             if fold(target) in ('nickserv', 'chanserv') and service_origin is None:
@@ -691,9 +731,6 @@ class ChatApp(ReleaseUI, ChatUX, App):
             return
         _, target, message = service_input_parts(text, self.active)
         sensitive = service_secret(target, message)
-        if not sensitive:
-            sensitive = any(isinstance(secret, str) and secret and secret in text for secret in
-                            [self.sasl_password, getattr(self.client, 'sasl_password', '')] + self.session_secrets)
         if not sensitive:
             self.history.append(text)
             self.history = self.history[-100:]
@@ -759,7 +796,7 @@ class ChatApp(ReleaseUI, ChatUX, App):
             self.service_context.pop(fold(arg), None)
             if fold(arg) in ('nickserv', 'chanserv'):
                 self.service_queries.add(fold(arg))
-            self.switch(arg)
+            self.switch(pm_name(arg))
         elif name == 'ignore' and valid_target(arg):
             self.ignored.add(fold(arg))
             self.add_message('server', f'Ignoring {arg} for this session.')
@@ -845,6 +882,7 @@ class ChatApp(ReleaseUI, ChatUX, App):
         elif name == 'msg':
             target, _, message = arg.partition(' ')
             if valid_target(target) and message:
+                target = pm_name(target)
                 service = fold(target) in ('nickserv', 'chanserv')
                 origin = buf.name if service else None
                 if not self.send_message(target, message, service_origin=origin) and not service_secret(target, message):
@@ -985,9 +1023,6 @@ class ChatApp(ReleaseUI, ChatUX, App):
         self.put(h-2, 0, 'Tip: maximize terminal for more messages/users. Esc: dismiss' if self.ready and w < 90 and not self.size_tip_dismissed else 'F7: focus USERS | F8: full topic | Click user: PM', w-1, curses.A_DIM)
         offset = max(0, self.cursor - (w-5))
         display = masked_service_input(self.input_text, self.active)
-        for secret in [self.sasl_password, getattr(self.client, 'sasl_password', '')] + self.session_secrets:
-            if isinstance(secret, str) and secret:
-                display = display.replace(secret, '*' * len(secret))
         self.put(h-1, 0, '> ' + display[offset:], w-1)
         if self.menu:
             for row, line in enumerate([' ACTIONS (press number; Esc closes)', ' 1 Join channel', ' 2 Private message', ' 3 WHOIS user', ' 4 Leave channel', ' 5 Help', ' 6 Quit', ' 7 Connection settings', ' 8 Connect / Reconnect', ' 9 Disconnect'], 0):
@@ -1002,6 +1037,10 @@ class ChatApp(ReleaseUI, ChatUX, App):
         self.screen.refresh()
 
     def key(self, key):
+        if self.paste_active:
+            self.expire_paste()
+            self.consume_paste(key)
+            return
         if self.commands_key(key):
             self.show_commands()
             return
@@ -1110,7 +1149,7 @@ class ChatApp(ReleaseUI, ChatUX, App):
                     if x < 20 and y in self.click_buffers:
                         self.switch(self.click_buffers[y])
                     elif x >= self.screen.getmaxyx()[1]-18 and y in self.click_users:
-                        self.switch(self.click_users[y])
+                        self.switch(pm_name(self.click_users[y]))
                 elif state & getattr(curses, 'BUTTON4_PRESSED', 0):
                     buf.scroll += 3
                 elif state & getattr(curses, 'BUTTON5_PRESSED', 0):
@@ -1176,26 +1215,62 @@ class ChatApp(ReleaseUI, ChatUX, App):
                 if sequence.endswith('~'):
                     break
         except curses.error:
-            return
+            pass
         finally:
             self.screen.timeout(100)
         if sequence != '[200~':
+            if sequence.startswith('[200'):
+                self.begin_paste()
+                self.reject_paste('had a malformed start marker')
             return
-        pasted = ''
-        marker = '\x1b[201~'
+        self.begin_paste()
         self.screen.timeout(2000)
         try:
-            while len(pasted) < 10000 and not pasted.endswith(marker):
-                part = self.screen.get_wch()
-                if isinstance(part, str):
-                    pasted += part
+            # Yield to drawing/events on large pastes. key() continues draining
+            # the paste before interpreting any shortcuts or executable input.
+            for _ in range(1024):
+                self.consume_paste(self.screen.get_wch())
+                if not self.paste_active:
+                    break
         except curses.error:
-            self.add_message('error', 'Paste timed out and was cancelled.')
-            return
+            self.reject_paste('timed out')
         finally:
             self.screen.timeout(100)
-        if pasted.endswith(marker):
-            self.review_paste(pasted[:-len(marker)])
+
+    def begin_paste(self):
+        self.paste_active = True
+        self.paste_buffer = []
+        self.paste_tail = ''
+        self.paste_rejected = False
+        self.paste_last_input = time.monotonic()
+
+    def reject_paste(self, reason):
+        if not self.paste_rejected:
+            self.paste_rejected = True
+            self.paste_buffer.clear()
+            self.add_message('error', f'Paste {reason} and was cancelled. Discarding input until the paste end marker.')
+
+    def expire_paste(self):
+        if self.paste_active and time.monotonic() - self.paste_last_input >= 2:
+            self.reject_paste('timed out')
+
+    def consume_paste(self, part):
+        if not isinstance(part, str):
+            return
+        self.paste_last_input = time.monotonic()
+        marker = '\x1b[201~'
+        self.paste_tail = (self.paste_tail + part)[-len(marker):]
+        if not self.paste_rejected:
+            self.paste_buffer.append(part)
+            if len(self.paste_buffer) > 10000 + len(marker):
+                self.reject_paste('exceeded 10000 characters')
+        if self.paste_tail == marker:
+            self.paste_active = False
+            pasted = ''.join(self.paste_buffer)
+            self.paste_buffer.clear()
+            self.paste_tail = ''
+            if not self.paste_rejected:
+                self.review_paste(pasted[:-len(marker)])
 
     def review_paste(self, pasted):
         pasted = pasted.replace('\r\n', '\n').replace('\r', '\n')
@@ -1207,7 +1282,7 @@ class ChatApp(ReleaseUI, ChatUX, App):
         self.screen.erase()
         self.put(1, 2, f'MULTILINE PASTE: {len(lines)} lines', w-4, curses.A_BOLD)
         self.put(2, 2, 'Nothing has been sent. Y inserts it as one draft; any other key cancels.', w-4)
-        preview = [clean(line) for line in lines[:max(1, h-6)]]
+        preview = [clean(masked_service_input(line, self.active)) for line in lines[:max(1, h-6)]]
         for row, line in enumerate(preview, 4):
             self.put(row, 4, line, w-8)
         self.screen.refresh()

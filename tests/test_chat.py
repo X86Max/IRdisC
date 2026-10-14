@@ -4,12 +4,14 @@ import unittest
 from unittest.mock import MagicMock, patch
 from irdisc import IRCClient, Event
 from terminal_ui import ChatApp, clean
+from irdisc_settings import default_preferences
 
 class ChatTests(unittest.TestCase):
     def setUp(self):
         self.screen = MagicMock()
         self.screen.getmaxyx.return_value = (25, 110)
-        self.app = ChatApp(self.screen)
+        with patch('terminal_ui.load_preferences', side_effect=default_preferences):
+            self.app = ChatApp(self.screen)
         self.app.client = MagicMock(nick='Max', connected=True)
         self.app.ready = True
 

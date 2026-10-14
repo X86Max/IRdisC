@@ -27,6 +27,15 @@ def fold(value):
     return value.lower().translate(str.maketrans('[]\\^', '{}|~'))
 
 
+def pm_name(nick):
+    """Reserve the status buffer; @ cannot be part of a legal IRC nickname."""
+    return '@server' if fold(nick) == 'server' else nick
+
+
+def pm_nick(name):
+    return 'server' if fold(name) == '@server' else name
+
+
 def nick_color_index(nick, count):
     return int.from_bytes(hashlib.sha256(fold(nick).encode()).digest()[:4], 'big') % max(1, count)
 
@@ -119,7 +128,7 @@ class ChatUX:
         if target.startswith('*'):
             return [('Close conversation', 'close'), ('Clear local history', 'clear')]
         return [('Close conversation', 'close'), ('WHOIS user', 'whois'),
-                ('Unignore user' if fold(target) in self.ignored else 'Ignore user', 'ignore'),
+                ('Unignore user' if fold(pm_nick(target)) in self.ignored else 'Ignore user', 'ignore'),
                 ('Copy nickname', 'copy')]
 
     def open_context(self, kind, target, x=2, y=2):
@@ -207,16 +216,18 @@ class ChatUX:
         elif action in ('settings', 'reconnect', 'disconnect'):
             self.command({'settings': '/connection', 'reconnect': '/reconnect', 'disconnect': '/disconnect'}[action])
         elif action == 'pm':
-            self.switch(target)
+            self.switch(pm_name(target))
         elif action == 'mention':
             if ctx['origin'] in self.buffers:
                 self.switch(ctx['origin'])
-            self.insert_text(target + (': ' if self.cursor == 0 else ' '))
+            self.insert_text(pm_nick(target) + (': ' if self.cursor == 0 else ' '))
         elif action == 'ignore':
+            target = pm_nick(target)
             self.command(('/unignore ' if fold(target) in self.ignored else '/ignore ') + target)
         elif action == 'whois':
-            self.command('/whois '+target)
+            self.command('/whois '+pm_nick(target))
         elif action == 'copy':
+            target = pm_nick(target)
             success = copy_text(target)
             self.add_message('server' if success else 'error',
                              'Copied: '+target if success else 'Clipboard unavailable. Select/copy this name using your terminal: '+target)
@@ -241,8 +252,11 @@ class ChatUX:
                         'selected': 0, 'x': 2, 'y': 2}
 
     def rename_pm(self, old, new):
-        oldkey, newkey = fold(old), fold(new)
-        if oldkey not in self.buffers or oldkey == 'server':
+        # NICK cannot turn a channel or a local view into a private buffer.
+        if any(name.startswith(('#', '&', '*', '@')) for name in (old, new)):
+            return
+        oldkey, newkey = fold(pm_name(old)), fold(pm_name(new))
+        if oldkey not in self.buffers:
             return
         buf = self.buffers[oldkey]
         if self.active == oldkey:
@@ -263,6 +277,6 @@ class ChatUX:
             self.input_text = buf.draft
             self.cursor = len(self.input_text)
         del self.buffers[oldkey]
-        buf.name = new
+        buf.name = pm_name(new)
         self.buffers[newkey] = buf
-        self.add_message('server', old+' is now '+new, new)
+        self.add_message('server', old+' is now '+new, buf.name)

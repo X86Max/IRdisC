@@ -13,7 +13,7 @@ from pathlib import Path
 class Profile:
     name: str = "OFTC"
     host: str = "irc.oftc.net"
-    port: int = 6697
+    port: int | str = 6697  # Empty string is the unconfigured editor value.
     tls: bool = True
     nick: str = ""
     channel: str = ""
@@ -93,11 +93,14 @@ def load_preferences(path: Path | None = None) -> Preferences:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
         profile = raw.get("profile", {})
-        port = int(profile.get("port", 6697))
-        if not 1 <= port <= 65535:
+        saved_port = profile.get("port", 6697)
+        port = '' if saved_port == '' else int(saved_port)
+        if port != '' and not 1 <= port <= 65535:
             raise ValueError("invalid port")
         host = str(profile.get("host", "irc.oftc.net")).strip()
-        if not host or any(c.isspace() for c in host):
+        # An empty draft is valid storage, but validate_profile still prevents
+        # connecting until the user supplies a host, port and nickname.
+        if any(c.isspace() for c in host):
             raise ValueError("invalid host")
         saved_profiles = raw.get("profiles", {})
         if not isinstance(saved_profiles, dict):

@@ -101,7 +101,8 @@ class ServicesAuthTests(unittest.TestCase):
         self.assertIn('/msg NickServ IDENTIFY ***********', drawn)
         self.assertNotIn('my-password', drawn)
 
-    def test_service_echo_names_actual_destination_without_extra_send(self):
+    @patch('terminal_ui.append_log')
+    def test_service_echo_names_actual_destination_without_extra_send(self, _log):
         app = self.app
         app.receive(':Max!u@h JOIN :#irdisc')
         app.client.send.reset_mock()
