@@ -162,7 +162,7 @@ class IRCClient:
             elif subcommand == "NAK":
                 self.events.put(Event("auth_error", "SASL is unavailable on this server (capability rejected)."))
                 self._end_cap()
-        elif command == "AUTHENTICATE" and params and params[0] == "+":
+        elif command == "AUTHENTICATE" and not self.cap_ended and (params[0] if params else trailing) == "+":
             plain = f"\0{self.sasl_account}\0{self.sasl_password}".encode("utf-8")
             encoded = base64.b64encode(plain).decode("ascii")
             for start in range(0, len(encoded), 400):
@@ -172,7 +172,7 @@ class IRCClient:
         elif command == "903":
             self.events.put(Event("auth", "SASL authentication succeeded."))
             self._end_cap()
-        elif command in {"904", "905", "906", "907"}:
+        elif command in {"902", "904", "905", "906", "907"}:
             self.events.put(Event("auth_error", "SASL authentication failed. Review the account and password in /connection."))
             self._end_cap()
         # Protocol state is interpreted by the UI on its own thread.

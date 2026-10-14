@@ -1,10 +1,16 @@
-# IRdisC v0.1.1 — independent verification and first remediation pass
+# IRdisC v0.1.1 — independent verification and security remediation
+
+Round 2 addresses the mandatory findings from the independent review of snapshot `7a3595c1d7c7d6382965cc55c0c025bda6a87de5` against local baseline `74d1eb7f9b40b1f4cdadbd03f3093b0cea637209`. The new suite contains **151 tests: the previous 121 + 30 new; all passed**. Review findings R1–R6, SASL 902 and `AUTHENTICATE :+` were reproduced before remediation. Current implementation, evidence, limitations and Git state are in sections F–K.
+
+Sections A–E preserve the first-pass record, including its original line references and test history. The independent review rejected that snapshot despite the 121 passing tests: paste handling and credential protection were incomplete. The first-pass “Fixed” labels below describe the original reproductions, not complete subsystem guarantees; sections F–K supersede their broader interpretation. The original socket-reference race, empty-profile persistence, reserved in-memory buffer protection and test-isolation fixes remain in place.
+
+## First-pass record (historical)
 
 Date: 14/10/2026. Execution environment: Linux, Python 3.13.5.
 
-The local changes fix BUG-01, BUG-02, BUG-03, BUG-04, BUG-07 and BUG-12.
-The final suite ran **121 tests: 93 existing + 28 new; all passed**.
-The remaining findings were assessed and remain outside this pass, as specified by the scope.
+The first-pass changes addressed BUG-01, BUG-02, BUG-03, BUG-04, BUG-07 and BUG-12.
+The first-pass final suite ran **121 tests: 93 existing + 28 new; all passed**.
+The remaining findings were assessed and stayed outside that pass, as specified by its scope.
 
 ## A. Verification matrix
 
@@ -87,6 +93,7 @@ The smoke test initially attempted to execute `irdisc.py` directly, but that fil
 #!/bin/sh
 exec /usr/bin/python3 /path/to/IRdisC/irdisc.py
 ```
+The original local filesystem path has been anonymized for publication. The launcher shown here is illustrative; the actual validation used a temporary launcher pointing to the local checkout.
 
 The syntax validation performed in Python uses:
 
@@ -158,3 +165,124 @@ No commit, staging, merge, push, tagging or publication was performed. The versi
 
 In addition to this diff, the new files for review are this report and `tests/test_audit_regressions.py`.
 `release/` is the pre-existing artifacts directory, preserved in full.
+
+## F. Round 2 — independent reproduction and resolution matrix
+
+Date: 14/10/2026. Runtime: Linux, Python 3.13.5. The source findings were reproduced on local commit `74d1eb7`, rather than assuming that a passing suite or the review's earlier archive established their correctness. All credentials and identities introduced by this round are synthetic. Logs were written only to temporary directories; no production IRC network was contacted.
+
+| Review finding | Verification, severity and observed baseline effect | Resolution and evidence |
+| --- | --- | --- |
+| R1 — fragmented paste start | Confirmed; high. Interrupting after `[`, `[2` or `[20` allowed `200~hello`, `00~hello` or `0~hello` to be sent to `#test`, followed by `/quit` setting `running=False`. | A persistent escape-prefix state survives read timeouts, mouse/resize notifications and changes of dialog. All six boundaries in the six-byte start marker and a pause after every byte have deterministic coverage. Dangerous suffixes produce no unreviewed sends, history entries or quit. Normal Esc, decoded keys, raw CSI/SS3 arrows, shortcuts and ordinary typed text have positive coverage. |
+| R2 — modal readers | Confirmed; high. Both help and the connection editor consumed the opening ESC, then released `[200~hello` as a channel message and executed `/quit`. | Chat, help, editor (including its small-terminal branch), selector, paste confirmation and startup use the same framing boundary. Inline context menus, topic view and action menu also pass through it. A paste that starts in a dialog is discarded through its end marker even if Esc dismisses that dialog. Help/editor/selector/confirmation and inline dialogs have no-send/no-quit regressions; real PTY probes cover help, editor and nested paste confirmation. |
+| R3 — normalization order | Confirmed; high. A Services reply containing `demo-\x02secret` became the unredacted `demo-secret` after display cleanup and was written to a real temporary log. | Formatting/control cleanup precedes contextual credential matching. The protected assembled representation is used for message storage, drawing and logging; stored topic text and authentication events use the same normalization. Tests include bold, color, italic, underline and a nonprinting Unicode character, across status/channel/Services origins. |
+| R4 — numeric middle parameters | Confirmed; high. `:srv 400 Tester demo-secret :Invalid parameter` wrote the synthetic credential to both status and channel logs. | The complete rendered numeric message, including its middle parameters, is normalized and redacted before buffering/logging. Raw protocol parameters remain available for protocol state. Regression checks both log files, visible buffers, rendering and a formatted trailing parameter. |
+| R5 — service actions | Confirmed; medium. `/me IDENTIFY demo-secret` in a NickServ PM entered history, produced an unmasked action log and sent a CTCP ACTION containing the credential. | `/me` and explicit CTCP ACTION bodies share sensitive-input recognition and masking. Recognized credential-bearing service actions are rejected before transmission with a constant message. Submission clears sensitive history drafts and the active saved draft, including failed/offline cases. Ordinary channel/peer actions still send their normal CTCP ACTION and retain their usual history/echo. |
+| R6 — whitespace/parser mismatch | Confirmed; medium. A tab-separated `/msg` was masked by the classifier but treated as an unknown command; its error logged `msgnickservidentifydemo-secret`. | Command and `/msg` argument parsing now accept the same whitespace as the classifier. Unknown-command errors do not interpolate an untrusted command name. Tests cover tabs, spaces, mixed whitespace and a nonbreaking space; the recognized command sends once, stays out of history and never exposes the credential through errors or logs. |
+
+These are scoped resolutions of the mandatory reproductions and their tested variants. They are not a claim that arbitrary text or all proprietary authentication formats can be recognized as passwords.
+
+## G. SASL protocol corrections
+
+- **902:** reproduced before the fix with `cap_ended=False`, no authentication-error event and no `CAP END`. It now follows the existing controlled authentication-failure path alongside 904–907. Dedicated credential-free output replaces the raw numeric in the UI. Tests feed each failure followed by 001: negotiation ends with exactly one `CAP END`, the UI retains `Authentication error`, and no configured-channel JOIN is sent.
+- **Challenge equivalence:** before the fix, `AUTHENTICATE +` sent a PLAIN response while `AUTHENTICATE :+` sent none. Both now produce the same expected base64 payload. A following 903 completes negotiation with exactly one `CAP END`.
+- **Late challenges:** once CAP has ended, neither challenge form sends credentials again.
+- **Unavailable versus failed:** absent SASL capability and CAP NAK retain their unavailable-capability messages; 902 produces an authentication-failure message. Existing success, unavailable/rejected SASL, NickServ, default `none` and legacy migration tests remain in the full suite.
+
+These tests use local protocol fixtures. They do not assert that OFTC naturally emits 902 or the trailing-parameter challenge form, or claim a real-network authentication result.
+
+## H. Files changed in Round 2
+
+| File | Reason and relevant implementation |
+| --- | --- |
+| `terminal_ui.py` | Persistent escape framing and shared modal reads (`read_key`, `filter_input`, `key`, paste review); normalized contextual display protection (`add_message`, `receive`, `redact_auth_text`); service action classification/masking/rejection and sensitive draft cleanup; whitespace-consistent command execution and constant unknown-command errors. The logging notice now accurately refers to recognized service credentials instead of promising that all passwords are never logged. |
+| `release_ui.py` | Help and network selection use the shared input boundary. Their layout and normal controls remain unchanged. |
+| `irdisc.py` | Add SASL 902 to the existing failure set, accept both challenge parameter forms, and ignore credential challenges after CAP ends. The socket ownership and lifecycle implementation is retained. |
+| `tests/test_review_security.py` | 30 new regression methods, with multiple boundary/control/origin/failure subcases. They check actual no-send/no-quit behavior, real temporary log contents, buffers, prompt rendering, history/draft history, normal actions and SASL wire/event/UI outcomes. |
+| `tools/terminal_smoke.py` | Extend the existing real PTY smoke with delayed marker splits, help/editor pastes and a paste arriving at multiline confirmation. Offline `/quit` probes must not exit the client; subsequent `/settings` confirms it still accepts commands. |
+| `tools/local_tls_smoke.py` | Reproducible optional transport check using verified localhost TLS over socketpairs. An existing OpenSSL executable generates an ephemeral synthetic certificate/key outside the checkout. No new package or runtime dependency is installed. Exit 77 explicitly means the fixture generator is unavailable; that outcome is not a pass. |
+| `AUDIT_REMEDIATION.md` | Preserve first-pass evidence, identify its incomplete scope, and document Round 2 verification, changes, executed checks and remaining risks. Retain the publication-safe launcher clarification in the historical record. |
+
+No source/version changes were made in `chat_ux.py`, `irdisc_settings.py`, `pyproject.toml` or the earlier regression files during this round. Existing PM/status separation, settings persistence and lifecycle tests remain part of validation.
+
+## I. Round 2 test results and commands
+
+| Executed validation | Result and limits |
+| --- | --- |
+| Unmodified local baseline | **121/121 passed**, in 0.310 s, with isolated HOME/XDG and local sockets permitted. This corroborates the original test count, not the absence of security flaws. |
+| Original R1–R6/SASL probes | All six review findings confirmed through actual application methods; R3–R6 wrote synthetic credentials to real temporary logs. Both SASL defects were reproduced. The probe script and output were kept outside the project tree. |
+| New regressions against a temporary extraction of `74d1eb7` | **30 methods run; `FAILED (failures=54)`**, zero errors, in 0.090 s. Failure counters include subtests and are not a count of 54 test methods. The old implementation fails the security/protocol assertions; positive compatibility cases also run. |
+| New regressions after correction | **30/30 passed**. |
+| Full isolated suite | **151/151 passed**, zero failures/errors, in 0.433 s: the original 121 plus 30 Round 2 methods. |
+| Full suite with default configuration/state lookups forbidden | **151/151 passed**, zero failures/errors, in 0.430 s. Explicit temporary file paths and mocked preferences remain allowed. |
+| Local verified TLS | **2 scenarios passed**: blocked reader and blocked writer. Close took 0.000122 s and 0.000061 s respectively; the non-reading peer stalled the writer after seven successful sends. Reader and writer exited without captured exceptions. This is an external-thread shutdown check, not proof of UI responsiveness during a stalled write. |
+| Real PTY | **PASS**: startup, picker, help, five delayed start-marker splits in help, editor paste, nested paste confirmation, subsequent commands, resize, clean exit and title save/restore sequences. No IRC connection. |
+| Syntax | **23 Python files passed** in-memory compilation and Python 3.11 grammar parsing. Execution runtime is 3.13.5; no Python 3.11 runtime claim. |
+| Whitespace review | `git diff --check` passed. |
+
+The first sandbox baseline attempt had three error entries: two socketpair timeouts and a loopback-socket permission error. The TLS tool's sandbox attempt was also blocked at `SO_SNDBUF`. The successful socket validations above ran outside the sandbox after authorization; those environmental failures were not counted as passes. HOME/XDG are isolated throughout, and no dependencies were installed.
+
+For publication, `$AUDIT_TMP` below denotes the temporary audit directory, and `$SOURCE_ROOT` the checkout. These are placeholders for local paths, not committed personal paths. With HOME/XDG set to `$AUDIT_TMP/home`, `$AUDIT_TMP/config`, `$AUDIT_TMP/state` and `PYTHONDONTWRITEBYTECODE=1`, the executed checks were:
+
+```sh
+python3 -m unittest tests.test_review_security
+python3 -m unittest discover -s tests
+PYTHONPATH=. python3 tools/local_tls_smoke.py
+python3 tools/terminal_smoke.py "$AUDIT_TMP/irdisc-source"
+git diff --check
+```
+
+The temporary PTY launcher invokes the existing interpreter on `$SOURCE_ROOT/irdisc.py`. It is outside the checkout and no package was installed. The full-suite guard was executed with:
+
+```python
+import unittest
+from unittest.mock import patch
+with patch('irdisc_settings.config_dir', side_effect=AssertionError('Default configuration directory access forbidden')), patch('irdisc_settings.state_dir', side_effect=AssertionError('Default state directory access forbidden')):
+    suite = unittest.defaultTestLoader.discover('tests')
+    result = unittest.TextTestRunner(verbosity=1).run(suite)
+raise SystemExit(not result.wasSuccessful())
+```
+
+The syntax check follows the in-memory AST/compile procedure recorded in section C, now including the new test and TLS tool. Baseline extraction used tracked `git archive HEAD` content in a temporary directory and copied only the new test module into that copy. Untracked `release/` was excluded and was not opened, modified or packaged in this round.
+
+## J. Remaining limitations and merge status
+
+- **R7 remains open:** status and `@server` PM logs can share `server.log`; the repaired in-memory buffer namespace does not fix the persistence namespace.
+- **R8 remains open:** synchronous unbounded `sendall` can block the UI. Another thread can interrupt it, as demonstrated by the TLS test; an operator's disconnect on that blocked UI thread is not a verified escape. No broad write-queue redesign was attempted.
+- **BUG-05, 08, 09, 10, 11 and 13 remain outside this round:** channel NOTICE routing; unwanted sends from local search; nickname-validation inconsistency; keyed JOIN support; quit reason; residual pending NAMES state and its incompletely demonstrated practical consequence.
+- **NickServ/autojoin sequencing remains:** IDENTIFY is sent before JOIN without waiting for service confirmation. The new no-autojoin assertions cover SASL failure, not successful NickServ account confirmation or entry into authentication-restricted channels.
+- **Input recovery and scope:** a possible paste-start prefix is retained across arbitrary input delays. Esc can dismiss a dialog immediately while retaining that framing role; an ambiguous literal escape-prefix sequence may wait for more input. Paste beginning in a dialog is discarded, not inserted into editor fields. Missing end markers still quarantine subsequent input until the closing marker or application restart. Oversize/malformed recognized pastes retain bounded storage and do not become executable suffixes. Tests do not certify every emulator's key encoding or arbitrary malformed terminal traffic.
+- **Credentials:** recognized Services commands retain partial masking; ordinary peer messages deliberately remain outside contextual redaction. Proprietary/unrecognized authentication syntax, transformed echoes beyond the tested normalization and passwords deliberately posted as ordinary chat are not universally detectable. Manual service credential messages are still not separately TLS-gated when an unencrypted `none` session is in use; configured SASL/NickServ profile validation continues to require TLS.
+- **Other prior risks remain:** silent transport loss without a heartbeat, CJK/emoji prompt cursor width, all-channel rejoin, Tab cycling, operator commands, unnecessary NAMES after MODE, the settings temporary-file permission window and the dynamic import. Cancellation during connection creation/handshake still relies on those operations completing or timing out; this round does not establish an end-to-end 15-second cancellation bound.
+- **Not executed:** production IRC/OFTC authentication, NAT/Wi-Fi failure emulation, a physical keyboard/mouse/CJK session, an emulator/OS matrix or Python 3.11 runtime execution. These remain real-network/manual QA tasks.
+
+**Mandatory blocker status:** none of R1–R6, SASL 902 or the trailing-parameter challenge remains unresolved in the executed reproductions and regressions. This is a locally tested candidate for the next independent review, not an assertion of merge approval. R7/R8 and the listed nonblocking findings remain explicitly open.
+
+## K. Round 2 Git review
+
+Working branch: `fix/audit-v0.1.1`. HEAD remains `74d1eb7f9b40b1f4cdadbd03f3093b0cea637209`; `main` remains `f33692e9e5db60021913c75ef731f3e57542da44`. Branch/tag refs are compared against the start of this round. Existing tags, the published version, website and untracked `release/` are outside the edits. No staging, commit, amendment, merge, push, tag or publication is performed.
+
+`git status --short` for this round:
+
+```text
+ M AUDIT_REMEDIATION.md
+ M irdisc.py
+ M release_ui.py
+ M terminal_ui.py
+ M tools/terminal_smoke.py
+?? release/
+?? tests/test_review_security.py
+?? tools/local_tls_smoke.py
+```
+
+`git diff --stat` (tracked files only; new test/TLS files are untracked):
+
+```text
+ AUDIT_REMEDIATION.md    | 136 ++++++++++++++++++++++++++-
+ irdisc.py               |   4 +-
+ release_ui.py           |   4 +-
+ terminal_ui.py          | 239 ++++++++++++++++++++++++++++++++----------------
+ tools/terminal_smoke.py |  28 +++++-
+ 5 files changed, 323 insertions(+), 88 deletions(-)
+```
+
+The seven intended changed/new files are listed in section H. The pre-existing `release/` status entry is not a change made by this round.

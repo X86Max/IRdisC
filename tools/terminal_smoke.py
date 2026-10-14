@@ -54,6 +54,32 @@ def main():
             expect('Optional: #channel')
             send('\x1b')
             expect('Welcome!')
+            # Real terminal framing: delayed starts must remain paste across
+            # the Esc that dismisses help. These offline /quit probes must not
+            # exit the client, even when every possible start boundary pauses.
+            start, end = '\x1b[200~', '\x1b[201~'
+            dangerous = 'hello\r/quit\r'
+            for boundary in range(1, len(start)):
+                send('/help\r')
+                expect('/connect')
+                send(start[:boundary])
+                time.sleep(.08)
+                send(start[boundary:] + dangerous + end)
+                expect('cancelled')
+                send('/settings\r')
+                expect('Network=')
+            send('/connection\r')
+            expect('Optional: #channel')
+            send(start + dangerous + end)
+            expect('cancelled')
+            send('/settings\r')
+            expect('Network=')
+            send(start + 'one\r/two' + end)
+            expect('MULTILINE PASTE')
+            send(start + dangerous + end)
+            expect('cancelled')
+            send('/settings\r')
+            expect('Network=')
             send('/help\r')
             expect('/connect')
             fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', 12, 60, 0, 0))
@@ -76,7 +102,7 @@ def main():
                         pass
                     assert '\x1b]2;⇹ IRdisC\x1b\\'.encode() in transcript
                     assert b'\x1b[22;2t' in transcript and b'\x1b[23;2t' in transcript
-                    print('PASS: isolated TUI, startup, picker, help, resize, quit, title set/restore sequences')
+                    print('PASS: isolated TUI, startup, picker, help, fragmented/modal/confirmation paste, resize, quit, title set/restore sequences')
                     return
                 if select.select([fd], [], [], .1)[0]:
                     try:

@@ -122,7 +122,7 @@ class ReleaseUI:
             self.put(h-1, 0, '[Close] Esc | ↑↓ PgUp/PgDn wheel | Ctrl+G: help fallback', w-1)
             self.screen.refresh()
             try:
-                key = self.screen.get_wch()
+                key = self.read_key()
             except curses.error:
                 continue
             if key in ('\x1b', 'q', '\n', '\r') or self.commands_key(key):
@@ -152,7 +152,7 @@ class ReleaseUI:
             self.put(h-1, 0, '[Cancel] Esc | Enter: select | '+self.commands_label(), w-1)
             self.screen.refresh()
             try:
-                key = self.screen.get_wch()
+                key = self.read_key()
             except curses.error:
                 continue
             if self.commands_key(key):
