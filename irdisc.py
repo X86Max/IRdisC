@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""IRdisC v0.1.1 — a deliberately small, beginner-friendly IRC terminal client."""
+"""IRdisC v0.1.2 — a deliberately small, beginner-friendly IRC terminal client."""
 
 from __future__ import annotations
 
@@ -398,7 +398,7 @@ def main() -> None:
     import argparse
     import sys
     parser = argparse.ArgumentParser(description='⇹ IRdisC — IRC, discomplicated.')
-    parser.add_argument('--version', action='version', version='IRdisC 0.1.1')
+    parser.add_argument('--version', action='version', version='IRdisC 0.1.2')
     parser.parse_args()
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         parser.exit(2, 'IRdisC needs an interactive terminal. Use --help for usage.\n')

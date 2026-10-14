@@ -216,7 +216,7 @@ class ChatApp(ReleaseUI, ChatUX, App):
                     except curses.error:
                         pass
                     continue
-                self.put(0, 1, '⇹ IRdisC v0.1.1 | ' + self.status, w-2, curses.A_BOLD)
+                self.put(0, 1, '⇹ IRdisC v0.1.2 | ' + self.status, w-2, curses.A_BOLD)
                 self.put(1, 1, 'IRC, discomplicated. | Tab: next | Esc: Cancel | F4: load saved', w-2)
                 rows = max(1, (h-6)//2)
                 start = max(0, min(selected, len(fields)-1)-rows+1)

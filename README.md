@@ -4,7 +4,7 @@
 
 **IRC, discomplicated.**
 
-**Current release: v0.1.1**
+**Release candidate: v0.1.2** — publication pending; v0.1.1 remains the published release.
 
 IRdisC is a lightweight IRC TUI that keeps the simplicity of a terminal and adds
 conveniences usually found in graphical clients. Choose a network and nickname;
@@ -52,11 +52,12 @@ python3 -m venv .venv
 
 Source installation uses setuptools >=77, declared in pyproject.toml. If your
 distribution packages Python venv separately, install that package first. Avoid
-installing into the system Python. The release bundle also contains a built wheel:
+installing into the system Python. Once v0.1.2 is packaged, its release bundle will
+contain a built wheel:
 
 ```bash
 python3 -m venv .venv
-.venv/bin/python -m pip install --no-index dist/irdisc-0.1.1-py3-none-any.whl
+.venv/bin/python -m pip install --no-index dist/irdisc-0.1.2-py3-none-any.whl
 .venv/bin/irdisc
 ```
 
@@ -177,17 +178,24 @@ the network advertises SASL PLAIN. NickServ sends `IDENTIFY` after IRC
 registration using the current nickname; the client reports only that it sent
 the request, since service success responses vary among networks. Both methods
 require verified TLS. Passwords are masked in the editor, held in memory only
-and **never saved in settings or logs**. Enter them again after restarting.
+and **never saved in settings**. Recognized Services credentials are redacted
+from contextual display/log output; this does not detect every authentication
+format or secrets posted as ordinary chat. Enter passwords again after restarting.
 `/settings` shows the selected method without displaying a password. New profiles
 default to None; older profiles with a SASL account retain SASL PLAIN.
+OFTC's published [Services FAQ](https://www.oftc.net/FAQ/Services/#do-you-provide-sasl)
+states that SASL is not currently provided; use NickServ authentication on OFTC.
+Real-network SASL was not validated for v0.1.2; deterministic protocol tests passed.
 
 `/msg NickServ` and `/msg ChanServ` show the service destination in the local
 echo (for example, `/msg ChanServ INFO #irdisc`) and replies in
 the conversation where the command was entered. A matching service reply is
 routed there for up to 30 seconds; unrelated later notices return to server.
 An actual service query remains a normal conversation. Manually entered service
-credential arguments are masked in the local echo and while typing; complete
-credential commands are omitted from input history. Prefer
+credential arguments are masked in the local echo, paste previews and while
+typing, including leading-whitespace commands. Sensitive submissions are omitted
+from input history and clear saved draft remnants; credential-bearing service
+actions are rejected before sending. Prefer
 the connection editor for NickServ identification.
 
 Logs are off by default. `/log on` writes under `~/.local/state/irdisc/logs`, or
@@ -231,23 +239,34 @@ This behavior is terminal-dependent.
 
 | Platform | Status |
 | --- | --- |
-| Linux | Tested here: automated suite, loopback IRC fixtures, real curses pseudoterminal and isolated wheel install on Python 3.12. Earlier builds were used on Debian. See QA.md for terminal-specific follow-up. |
+| Linux | v0.1.2 validation uses Python 3.13.5, isolated tests, local socket/TLS fixtures and real curses pseudoterminals. OFTC manual QA was reported by the maintainer. No v0.1.2 package installation has been tested yet; see QA.md. |
 | macOS / other Unix with curses | Expected to be portable; not tested for this release. |
 | Native Windows | Unsupported in this release; standard Windows Python lacks curses. |
 | WSL | Not tested for this release. |
 
-Python 3.11 is the declared minimum; execution tests here used 3.12. This is not
+Python 3.11 is the declared minimum; v0.1.2 execution checks use 3.13.5. This is not
 a claim of testing all supported Python versions or terminal emulators.
 
 ## Known limitations
 
 - One active network; multiple saved profiles.
 - History stays in memory, capped at 400 messages per conversation, and is not restored.
-- Partial IRCv3, SASL PLAIN and basic NickServ identification, no DCC or server history replay.
+- Partial IRCv3 CAP support: colonless capability lists and CAP NEW/DEL are not
+  handled. SASL PLAIN has deterministic coverage; real-network SASL is unverified.
+  Basic NickServ identification is supported; no DCC or server history replay.
+- R7: status and the `@server` PM can share `server.log`; their in-memory buffers
+  are separate. R8: synchronous `sendall` can block the UI; external-thread
+  shutdown does not prove an on-screen disconnect will remain usable.
+- Missing paste end markers can require an application restart to recover input.
+- NickServ autojoin does not wait for identification confirmation. Silent transport
+  loss has no heartbeat detection; creation/handshake cancellation waits for the
+  underlying operation to finish or time out.
 - Local echo means socket acceptance, not confirmed remote delivery.
 - Below 50 × 10, a resize prompt; below 90 columns, sidebars hide.
 - Complex emoji widths, fonts, colors, bell, mouse and function keys vary by terminal.
-- This first release does not implement every feature of mature IRC clients.
+- Deferred issues and privacy limits are detailed in [release notes](RELEASE_NOTES.md)
+  and AUDIT_REMEDIATION.md. The review verdict was APPROVE WITH RESERVATIONS;
+  there is no claim of freedom from vulnerabilities or complete IRCv3 compliance.
 
 ## Project philosophy
 

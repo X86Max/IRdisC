@@ -1,3 +1,157 @@
+# v0.1.2 release preparation and validation
+
+Date: 2026-10-14. Environment: Linux, Python 3.13.5. Local `main` remains at
+`43207badb689f2335018f698174b485acc8a3344`; preparation changes are uncommitted.
+This record supersedes the historical v0.1.1 validation for the current candidate.
+The complete v0.1.1 record below the separator is preserved unchanged.
+
+## Scope and version-reference inventory
+
+Preparation changes only version strings and current release documentation.
+No new features, authentication changes, tests, dependencies or UI redesign were
+introduced. The classic identity, assets and version-free help/title text remain.
+
+| File/reference | Version role and disposition |
+| --- | --- |
+| `pyproject.toml:7` | Authoritative package metadata: `0.1.2`. |
+| `irdisc.py:2`, `irdisc.py:401` | Application module description and CLI `--version`: `0.1.2`. |
+| `terminal_ui.py:219` | Connection-editor version banner: `v0.1.2`. |
+| `tools/build_release.py:16` | Archive/wheel naming constant: `0.1.2`; builder not executed. |
+| `README.md` | Candidate label and planned wheel installation filename: `v0.1.2` / `irdisc-0.1.2-py3-none-any.whl`; v0.1.1 remains explicitly published. |
+| `CHANGELOG.md`, `RELEASE_NOTES.md`, `QA.md` | New v0.1.2 sections precede preserved historical release/validation records. |
+| `AUDIT_REMEDIATION.md`, `tests/test_services_auth.py` | v0.1.1 audit evidence and historical regression description retained unchanged. |
+| `CONTRIBUTING.md` | The v0.1.0 feature-freeze reference is historical and retained. |
+| Existing tags and branch names | Historical Git identifiers, not application metadata; unchanged. |
+
+Version inventory used `git grep` over tracked files. Package metadata, CLI,
+connection-editor rendering and build constant were checked for agreement.
+`--help` works without opening the TUI. Version-free chat/help/terminal-title
+branding requires no release-number change.
+
+## Exact changed files
+
+- `CHANGELOG.md`: add the maintenance-release summary; retain older entries.
+- `README.md`: candidate/version/install references, current platform evidence,
+  contextual privacy guarantees and known limitations.
+- `RELEASE_NOTES.md`: proposed English v0.1.2 notes, review/manual QA and limitations;
+  retain the complete v0.1.1 notes.
+- `QA.md`: this preparation, validation and readiness record; retain v0.1.1 evidence.
+- `irdisc.py`: module description and CLI version only.
+- `pyproject.toml`: package version only.
+- `terminal_ui.py`: connection-editor version banner only.
+- `tools/build_release.py`: version constant only; no packaging run.
+
+## Executed validation
+
+| Check | Outcome and limits |
+| --- | --- |
+| Complete isolated unittest suite | **158/158 passed**, zero failures/errors, in **0.776 s**. Includes the existing security, SASL and seven B1 methods; no new tests were added for this metadata/documentation pass. |
+| Syntax/compile | **25 Python files passed** in-memory compilation and Python 3.11 grammar parsing. Runtime is 3.13.5; no Python 3.11 runtime execution was performed. |
+| Terminal smoke | **PASS**: startup, picker, help, fragmented/modal/confirmation paste, subsequent commands, resize, clean quit and title save/set/restore sequences. Real curses PTY, no IRC connection. |
+| Local verified TLS smoke | **PASS: 2 scenarios**. Blocked-reader close: **0.000090 s**; blocked-writer close: **0.000020 s**, after seven successful sends. Reader/writer exited. Existing OpenSSL generated a temporary synthetic localhost certificate/key; no dependencies installed. External-thread shutdown is not proof of UI responsiveness during a blocked send. |
+| Credential prompt smoke | **PASS: 8 real PTY pre-submission prompts**. Synthetic plaintext absent, command structure and mask present, zero sends. Uses a mocked client and isolated HOME/XDG. |
+| Metadata and history checks | **PASS**: package, CLI, editor banner and build versions agree; CLI help works. Prior changelog/release-note sections and complete audit are unchanged. |
+| Secret and personal-path review | **PASS within the stated scope**: 38 tracked UTF-8 text files scanned for private-key headers, AWS/GitHub/OpenAI/Slack token signatures, credential URLs and personal home paths; no matches. Six nonempty credential-like keyword/simple-assignment literal locations were confined to synthetic test/prompt fixtures. No tracked key, PEM, P12, log, `.env` or `config.json` files. Existing binary assets are unchanged. Heuristic scanning is not proof that every possible secret format is detectable. |
+| Git whitespace | `git diff --check`: **PASS**. |
+| Isolation and preservation | **PASS**: validation HOME/XDG directories remained empty; persistence/logging fixtures use their own temporary directories or mocks. All branch/tag refs match the initial snapshot; unchanged tracked files, including tests, assets and the audit, were verified by hashes. |
+
+The initial sandbox suite ran 158 methods in 4.788 s and ended with **three error
+entries**: two socketpair subtest timeouts and one loopback-socket permission error.
+The sandbox TLS attempt failed at `SO_SNDBUF` with a permission error. Neither
+attempt is counted as a pass. The successful suite and local TLS runs above used
+authorized execution outside the sandbox and only local sockets.
+
+An additional metadata probe initially checked the version-free chat screen for
+a version banner and failed that assertion. The corrected probe exercised the
+connection editor, where the version banner is displayed, and passed; no application
+behavior was changed in response.
+
+### Commands and isolation
+
+`$QA_TMP` denotes the temporary validation directory; `$SOURCE_ROOT` denotes this
+checkout. These publication-safe placeholders replace local filesystem paths.
+The commands ran with HOME, XDG_CONFIG_HOME and XDG_STATE_HOME set to
+`$QA_TMP/home`, `$QA_TMP/config` and `$QA_TMP/state`, and
+`PYTHONDONTWRITEBYTECODE=1`:
+
+```sh
+python3 -m unittest discover -s tests
+python3 tools/terminal_smoke.py "$QA_TMP/irdisc-source"
+PYTHONPATH=. python3 tools/local_tls_smoke.py
+python3 tools/credential_prompt_smoke.py
+python3 irdisc.py --version
+python3 irdisc.py --help
+git diff --check
+```
+
+The executable PTY launcher is outside the checkout and invokes the existing
+Python interpreter on `$SOURCE_ROOT/irdisc.py`; no package was built or installed.
+Syntax validation used `ast.parse(..., feature_version=(3, 11))` and
+`compile(source, filename, 'exec')` on all tracked Python files, without bytecode
+writes. Secret/path checks scanned tracked text only; no user preferences/logs,
+real credentials, SASL payloads or untracked `release/` contents were inspected.
+
+## Independent review and OFTC manual QA
+
+The maintainer reports **APPROVE WITH RESERVATIONS** from the independent security
+review and successful real-network OFTC checks of TLS, NickServ IDENTIFY/STATUS,
+contextual ChanServ replies, credential masking, reconnection, channel messages
+and PMs. These are supplied manual results, not public-network tests run during
+release preparation. No new public IRC connection was made.
+
+OFTC's published [Services FAQ](https://www.oftc.net/FAQ/Services/#do-you-provide-sasl)
+states that SASL is not currently provided. Deterministic SASL negotiation/failure
+tests passed; real SASL authentication was not validated on OFTC or another network.
+
+## Known limitations and publication boundary
+
+R7 (status/`@server` log collision) and R8 (synchronous sends can block the UI)
+remain open. CAP support is partial: colonless capability lists are ignored and
+CAP NEW/DEL are unhandled. Privacy is contextual, missing paste end markers can
+require restart, NickServ autojoin does not await service confirmation, and the
+other deferred findings remain documented in RELEASE_NOTES.md and the unchanged
+audit. No vulnerability-free or complete IRCv3-compliance claim is made.
+
+No remaining preparation-check failure was identified. This is not publication
+approval. Packaging and publication remain blocked on explicit authorization.
+The existing builder writes into `release/`, including `dist/SHA256SUMS`; it must
+be run only from a fresh approved staging tree/output location so that immutable
+v0.1.1 artifacts are preserved. No release packages were created here. Future
+v0.1.2 archive/checksum inspection and isolated wheel installation/smoke validation
+are still required after packaging is authorized; historical v0.1.1 package results
+are not evidence for a v0.1.2 wheel.
+
+Python 3.11 runtime, other operating systems, a terminal/emulator matrix, real SASL,
+NAT/Wi-Fi transport-loss emulation and additional physical mouse/keyboard/CJK
+acceptance remain unverified. R7/R8 and other reservations require release-owner
+acceptance; this preparation does not resolve or silently waive them.
+
+## Git state
+
+Working branch: `main`; HEAD remains `43207badb689f2335018f698174b485acc8a3344`.
+The `backup/pre-v0.1.2-merge` and `fix/audit-v0.1.1` branches remain at the same
+commit. The annotated v0.1.1 tag object remains
+`a15c72bb9e01456c8dcc43f2e42d3c3d3854f7bd`; its published commit remains
+`f33692e9e5db60021913c75ef731f3e57542da44`. No staging, commit, push, tag, merge,
+package creation or publication was performed. The untracked `release/` directory
+was not opened, modified, staged or traversed.
+
+Final `git status --short` for the eight-file preparation:
+
+```text
+ M CHANGELOG.md
+ M QA.md
+ M README.md
+ M RELEASE_NOTES.md
+ M irdisc.py
+ M pyproject.toml
+ M terminal_ui.py
+ M tools/build_release.py
+?? release/
+```
+
+---
+
 # v0.1.1 release validation
 
 Validation distinguishes automated checks from physical terminal/network behavior.
