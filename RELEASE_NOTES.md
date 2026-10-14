@@ -40,13 +40,13 @@ The maintainer reports an independent security verdict of **APPROVE WITH
 RESERVATIONS**, followed by real-network OFTC checks of verified TLS, NickServ
 IDENTIFY/STATUS, contextual ChanServ replies, credential masking, reconnection,
 channel messages and private messages. These manual results are supplied by the
-maintainer; release preparation does not repeat public-network connections.
+maintainer; release preparation did not repeat public-network connections.
 
 OFTC's published [Services FAQ](https://www.oftc.net/FAQ/Services/#do-you-provide-sasl)
 states that SASL is not currently provided. Real SASL authentication was therefore
 not validated on OFTC; deterministic SASL tests passed. Neither the review nor
 the tests establish that the application is vulnerability-free or fully
-IRCv3-compliant. Historical audit evidence remains in AUDIT_REMEDIATION.md.
+IRCv3-compliant. Historical audit evidence remains in [AUDIT_REMEDIATION.md](AUDIT_REMEDIATION.md).
 
 ## Remaining limitations
 
@@ -72,14 +72,21 @@ IRCv3-compliant. Historical audit evidence remains in AUDIT_REMEDIATION.md.
 - Deferred NOTICE routing, local-search sends, nickname validation, keyed JOIN,
   quit-reason handling and pending NAMES state remain outside this release's fixes.
   CJK/emoji cursor width, the settings temporary-file permission window and the
-  other deferred items in AUDIT_REMEDIATION.md also remain open.
+  other deferred items in [AUDIT_REMEDIATION.md](AUDIT_REMEDIATION.md) also remain open.
 
-## Preparation status
+## Release status
 
-This candidate is prepared locally and is **not published**. The published
-v0.1.1 tag and artifacts remain immutable. Packaging and publication require
-explicit approval and a fresh output location that preserves existing artifacts.
-See [QA.md](QA.md) for executed checks, platform limits and remaining acceptance.
+**IRdisC v0.1.2 is published as a stable maintenance release.**
+
+- **Release:** [v0.1.2](https://github.com/X86Max/IRdisC/releases/tag/v0.1.2)
+- **Release commit:** `2e6dd3f41dd0f090b76eff1860709c579a8b59ea`
+- **Published assets:** release ZIP, source ZIP, source tar.gz, Python wheel and `SHA256SUMS`.
+- **Integrity:** all five published assets were downloaded and verified after publication.
+
+The previously published v0.1.1 tag and release artifacts were preserved.
+See [QA.md](QA.md) for executed checks, platform limits and post-publication verification.
+
+---
 
 # ⇹ IRdisC v0.1.1
 
@@ -95,7 +102,8 @@ service notices remain in server status. Local echoes identify the service
 destination; credential arguments are masked in the input and local echo and
 excluded from logs and input history.
 
-Requires Python 3.11+ and a curses-capable terminal. See README.md and QA.md
-for installation, behavior, test coverage and live-network acceptance steps.
+Requires Python 3.11+ and a curses-capable terminal. See [README.md](README.md) and
+[QA.md](QA.md) for installation, behavior, test coverage and live-network acceptance steps.
 
-This is a local candidate. Publication, tags and releases are separate actions.
+**Historical release:** [v0.1.1](https://github.com/X86Max/IRdisC/releases/tag/v0.1.1)
+was published before v0.1.2. Its published tag and artifacts remain unchanged.
